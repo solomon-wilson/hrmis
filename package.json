@@ -11,7 +11,10 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix"
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "migrate": "ts-node src/scripts/migrate.ts up",
+    "migrate:rollback": "ts-node src/scripts/migrate.ts down",
+    "migrate:status": "ts-node src/scripts/migrate.ts status"
   },
   "keywords": ["employee", "management", "hr", "api"],
   "author": "",

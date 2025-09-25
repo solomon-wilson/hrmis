@@ -2,3 +2,4 @@
 export * from './connection';
 export * from './repositories';
 export * from './migrations';
+export * from './health';

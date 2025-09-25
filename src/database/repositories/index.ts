@@ -1,4 +1,7 @@
-// Export all repository classes
-export * from './EmployeeRepository';
-export * from './AuditLogRepository';
-export * from './UserRepository';
+// Export base repository classes and interfaces
+export * from './base';
+export * from './types';
+
+// Export specific repositories
+export * from './employee';
+export * from './audit';
