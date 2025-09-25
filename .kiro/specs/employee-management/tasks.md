@@ -103,7 +103,6 @@
 
 - [x] 6.1 Implement employee CRUD endpoints
 
-
   - Create EmployeeController with GET, POST, PUT, DELETE endpoints
   - Add request validation middleware and error handling
   - Implement pagination and filtering for employee list endpoint
@@ -120,19 +119,16 @@
 
 - [x] 6.3 Create manager and self-service endpoints
 
-
-
-
-
-
   - Implement GET /managers/{id}/reports endpoint for direct reports
   - Add employee self-service endpoints for profile updates
   - Create change request functionality for restricted fields
   - Write integration tests for manager and employee access scenarios
   - _Requirements: 4.1, 4.2, 4.4, 5.1, 5.2, 5.4, 5.5_
 
-- [ ] 7. Implement reporting and export functionality
-- [ ] 7.1 Create report generation service
+- [x] 7. Implement reporting and export functionality
+
+
+- [x] 7.1 Create report generation service
 
   - Implement ReportService with employee roster and department breakdown reports
   - Add filtering capabilities by department, status, date ranges, and employment type
@@ -140,7 +136,7 @@
   - Write unit tests for report generation logic
   - _Requirements: 6.1, 6.2_
 
-- [ ] 7.2 Add export functionality
+- [x] 7.2 Add export functionality
 
   - Implement CSV and PDF export capabilities
   - Add permission-based field filtering for exports

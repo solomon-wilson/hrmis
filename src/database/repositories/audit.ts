@@ -289,6 +289,26 @@ export class AuditLogRepository extends BaseRepository<AuditLog, CreateAuditLogI
   }
 
   /**
+   * Log report generation
+   */
+  async logReportGeneration(
+    reportType: string,
+    filters: Record<string, any>,
+    recordCount: number,
+    performedBy: string,
+    metadata?: Record<string, any>,
+    client?: PoolClient
+  ): Promise<AuditLog> {
+    return this.create({
+      entityType: 'REPORT',
+      action: 'VIEW',
+      changes: { filters, recordCount },
+      metadata: { ...metadata, reportType },
+      performedBy
+    }, client);
+  }
+
+  /**
    * Get audit trail for a specific entity
    */
   async getEntityAuditTrail(
