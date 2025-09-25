@@ -1,13 +1,13 @@
-import dotenv from 'dotenv';
-
-// Load environment variables
-dotenv.config();
-
 // Export all modules for easy access
 export * from './models';
 export * from './services';
 export * from './controllers';
 export * from './database';
+export * from './middleware';
+export * from './utils';
+export * from './app';
 
-// Main application entry point (to be implemented in later tasks)
-console.log('Employee Management System - Core interfaces and structure initialized');
+// Start server if this file is run directly
+if (require.main === module) {
+  require('./server');
+}

@@ -83,13 +83,7 @@
 
 - [x] 5. Implement authentication and authorization
 
-
-
-
-
-
 - [x] 5.1 Create authentication service
-
 
   - Implement JWT token generation and validation
   - Add user login/logout functionality with session management
@@ -97,14 +91,7 @@
   - Write unit tests for authentication flows
   - _Requirements: 4.3, 5.1_
 
-
-
 - [x] 5.2 Implement role-based access control
-
-
-
-
-
 
   - Create PermissionManager class with role definitions (HR_ADMIN, MANAGER, EMPLOYEE, VIEWER)
   - Implement permission checking methods for different operations
@@ -112,8 +99,10 @@
   - Write unit tests for permission validation scenarios
   - _Requirements: 4.3, 4.4, 5.3, 5.4_
 
-- [ ] 6. Create REST API controllers
-- [ ] 6.1 Implement employee CRUD endpoints
+- [-] 6. Create REST API controllers
+
+- [x] 6.1 Implement employee CRUD endpoints
+
 
   - Create EmployeeController with GET, POST, PUT, DELETE endpoints
   - Add request validation middleware and error handling
@@ -123,14 +112,18 @@
 
 - [x] 6.2 Add employee status management endpoints
 
-
   - Implement PUT /employees/{id}/status endpoint with validation
   - Create GET /employees/{id}/history endpoint for status history
   - Add proper error handling for invalid status transitions
   - Write integration tests for status management endpoints
   - _Requirements: 3.1, 3.2, 3.4_
 
-- [ ] 6.3 Create manager and self-service endpoints
+- [x] 6.3 Create manager and self-service endpoints
+
+
+
+
+
 
   - Implement GET /managers/{id}/reports endpoint for direct reports
   - Add employee self-service endpoints for profile updates

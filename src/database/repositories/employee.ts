@@ -166,7 +166,7 @@ export class EmployeeRepository extends BaseRepository<Employee, CreateEmployeeI
     `;
 
     const result = await this.executeQuery(selectQuery, params, client);
-    const employees = result.rows.map(row => this.mapRowToEmployeeModel(row));
+    const employees = result.rows.map((row: any) => this.mapRowToEmployeeModel(row));
 
     const page = pagination?.page || 1;
     const paginationMeta = this.calculatePaginationMeta(total, page, limit);
@@ -243,7 +243,7 @@ export class EmployeeRepository extends BaseRepository<Employee, CreateEmployeeI
     `;
 
     const result = await this.executeQuery(query, [managerId], client);
-    return result.rows.map(row => this.mapRowToEmployeeModel(row));
+    return result.rows.map((row: any) => this.mapRowToEmployeeModel(row));
   }
 
   /**
@@ -393,42 +393,5 @@ export class EmployeeRepository extends BaseRepository<Employee, CreateEmployeeI
     return Employee.fromJSON(employeeData);
   }
 
-  /**
-   * Map Employee domain model to database input
-   */
-  private mapEmployeeToCreateInput(employee: Employee, createdBy: string): CreateEmployeeInput {
-    const personalInfo = employee.personalInfo;
-    const jobInfo = employee.jobInfo;
-    const status = employee.status;
 
-    return {
-      employee_id: employee.employeeId,
-      first_name: personalInfo.firstName,
-      last_name: personalInfo.lastName,
-      email: personalInfo.email,
-      phone: personalInfo.phone,
-      date_of_birth: personalInfo.dateOfBirth,
-      social_security_number: personalInfo.socialSecurityNumber,
-      address_line1: personalInfo.address?.street,
-      city: personalInfo.address?.city,
-      state: personalInfo.address?.state,
-      postal_code: personalInfo.address?.zipCode,
-      country: personalInfo.address?.country,
-      emergency_contact_name: personalInfo.emergencyContact?.name,
-      emergency_contact_phone: personalInfo.emergencyContact?.phone,
-      emergency_contact_relationship: personalInfo.emergencyContact?.relationship,
-      job_title: jobInfo.jobTitle,
-      department_id: undefined, // Will need to be resolved from department name
-      manager_id: jobInfo.managerId,
-      start_date: jobInfo.startDate,
-      employment_type: jobInfo.employmentType,
-      salary: jobInfo.salary,
-      location: jobInfo.location,
-      status: status.current,
-      status_effective_date: status.effectiveDate,
-      status_reason: status.reason,
-      status_notes: status.notes,
-      created_by: createdBy
-    };
-  }
 }

@@ -1,4 +1,4 @@
 // Export all controller classes
 export * from './EmployeeController';
-export * from './AuthController';
-export * from './ReportController';
+export * from './ManagerController';
+export * from './EmployeeSelfServiceController';

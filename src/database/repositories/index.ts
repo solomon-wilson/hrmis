@@ -5,3 +5,4 @@ export * from './types';
 // Export specific repositories
 export * from './employee';
 export * from './audit';
+export * from './user';
