@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import { createApp } from './app';
 import { logger } from './utils/logger';
-import { database } from './database/connection';
+import { supabase } from './database/supabase';
 
 // Load environment variables
 dotenv.config();
@@ -11,10 +11,10 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 
 async function startServer() {
   try {
-    // Test database connection
-    logger.info('Testing database connection...');
-    await database.connect();
-    logger.info('Database connection successful');
+    // Test Supabase connection
+    logger.info('Testing Supabase connection...');
+    await supabase.connect();
+    logger.info('Supabase connection successful');
 
     // Create Express app
     const app = createApp();
@@ -36,11 +36,11 @@ async function startServer() {
         logger.info('HTTP server closed');
         
         try {
-          await database.disconnect();
-          logger.info('Database connections closed');
+          await supabase.disconnect();
+          logger.info('Supabase connections closed');
           process.exit(0);
         } catch (error) {
-          logger.error('Error during database shutdown:', error);
+          logger.error('Error during Supabase shutdown:', error);
           process.exit(1);
         }
       });

@@ -1,5 +1,4 @@
-// Export database utilities and repositories
-export * from './connection';
+// Export Supabase client and utilities
+export * from './supabase';
 export * from './repositories';
-export * from './migrations';
 export * from './health';

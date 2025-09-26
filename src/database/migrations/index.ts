@@ -69,6 +69,13 @@ class MigrationRunner {
     const { createEmployeesTable } = await import('./scripts/005_create_employees_table');
     const { createEmployeeStatusHistoryTable } = await import('./scripts/006_create_employee_status_history_table');
     const { createAuditLogsTable } = await import('./scripts/007_create_audit_logs_table');
+    
+    // Time and Attendance migrations
+    const createTimeEntriesTable = await import('./scripts/008_create_time_entries_table');
+    const createLeaveTypesTable = await import('./scripts/009_create_leave_types_table');
+    const createLeaveRequestsTable = await import('./scripts/010_create_leave_requests_table');
+    const createLeaveBalancesTable = await import('./scripts/011_create_leave_balances_table');
+    const createPoliciesTable = await import('./scripts/012_create_policies_table');
 
     migrations.push(
       createUsersTable,
@@ -77,7 +84,37 @@ class MigrationRunner {
       createDepartmentsTable,
       createEmployeesTable,
       createEmployeeStatusHistoryTable,
-      createAuditLogsTable
+      createAuditLogsTable,
+      {
+        id: '008',
+        name: 'create_time_entries_table',
+        up: createTimeEntriesTable.up,
+        down: createTimeEntriesTable.down
+      },
+      {
+        id: '009',
+        name: 'create_leave_types_table',
+        up: createLeaveTypesTable.up,
+        down: createLeaveTypesTable.down
+      },
+      {
+        id: '010',
+        name: 'create_leave_requests_table',
+        up: createLeaveRequestsTable.up,
+        down: createLeaveRequestsTable.down
+      },
+      {
+        id: '011',
+        name: 'create_leave_balances_table',
+        up: createLeaveBalancesTable.up,
+        down: createLeaveBalancesTable.down
+      },
+      {
+        id: '012',
+        name: 'create_policies_table',
+        up: createPoliciesTable.up,
+        down: createPoliciesTable.down
+      }
     );
 
     return migrations.sort((a, b) => a.id.localeCompare(b.id));

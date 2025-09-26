@@ -6,3 +6,6 @@ export { EmployeeStatus } from './EmployeeStatus';
 export { EmployeeStatusHistory, EmployeeStatusType } from './EmployeeStatusHistory';
 export * from './AuditLog';
 export * from './User';
+
+// Time and Attendance models
+export * from './time-attendance';

@@ -1,10 +1,11 @@
-import { checkDatabaseHealth, DatabaseHealthStatus } from '../database/health';
+import { supabase } from '../database/supabase';
 import { logger } from '../utils/logger';
 
-export interface RedisHealthStatus {
+export interface SupabaseHealthStatus {
   connected: boolean;
   responseTime: number;
   error?: string;
+  authReachable?: boolean;
 }
 
 export interface SystemHealthStatus {
@@ -14,8 +15,7 @@ export interface SystemHealthStatus {
   uptime: number;
   environment: string;
   services: {
-    database: DatabaseHealthStatus;
-    redis: RedisHealthStatus;
+    supabase: SupabaseHealthStatus;
     memory: {
       used: number;
       total: number;
@@ -28,34 +28,49 @@ export interface SystemHealthStatus {
 }
 
 /**
- * Check Redis health and connection status
+ * Check Supabase health and connection status
  */
-export async function checkRedisHealth(): Promise<RedisHealthStatus> {
+export async function checkSupabaseHealth(): Promise<SupabaseHealthStatus> {
   const startTime = Date.now();
-  
+
   try {
-    // Import Redis connection dynamically to avoid circular dependencies
-    const { redisConnection } = await import('../database/redis');
-    
-    // Test Redis connectivity with a ping
-    await redisConnection.ping();
-    
+    // Test Supabase database connectivity
+    const client = supabase.getClient();
+    const { data, error } = await client
+      .from('departments')
+      .select('count', { count: 'exact', head: true });
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = table doesn't exist
+      throw error;
+    }
+
+    // Test auth service
+    let authReachable = false;
+    try {
+      await client.auth.getSession();
+      authReachable = true;
+    } catch (authError) {
+      logger.warn('Supabase auth service not reachable', authError);
+    }
+
     const responseTime = Date.now() - startTime;
-    
+
     return {
       connected: true,
-      responseTime
+      responseTime,
+      authReachable
     };
   } catch (error) {
     const responseTime = Date.now() - startTime;
-    const errorMessage = error instanceof Error ? error.message : 'Unknown Redis error';
-    
-    logger.error('Redis health check failed', { error: errorMessage, responseTime });
-    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown Supabase error';
+
+    logger.error('Supabase health check failed', { error: errorMessage, responseTime });
+
     return {
       connected: false,
       responseTime,
-      error: errorMessage
+      error: errorMessage,
+      authReachable: false
     };
   }
 }
@@ -91,36 +106,32 @@ function getCpuStats() {
  */
 export async function performHealthCheck(): Promise<SystemHealthStatus> {
   const startTime = Date.now();
-  
+
   try {
-    // Check all services in parallel
-    const [databaseHealth, redisHealth] = await Promise.all([
-      checkDatabaseHealth(),
-      checkRedisHealth()
-    ]);
-    
+    // Check Supabase connectivity
+    const supabaseHealth = await checkSupabaseHealth();
+
     // Determine overall system status
     let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
-    
-    if (!databaseHealth.connected) {
+
+    if (!supabaseHealth.connected) {
       status = 'unhealthy';
-    } else if (!redisHealth.connected) {
-      status = 'degraded'; // Redis is not critical for basic functionality
+    } else if (!supabaseHealth.authReachable) {
+      status = 'degraded'; // Auth not critical for some functionality
     }
-    
+
     // Get system metrics
     const memoryStats = getMemoryStats();
     const cpuStats = getCpuStats();
-    
+
     // Log health check performance
     const totalTime = Date.now() - startTime;
     logger.debug('Health check completed', {
       status,
       totalTime,
-      databaseResponseTime: databaseHealth.responseTime,
-      redisResponseTime: redisHealth.responseTime
+      supabaseResponseTime: supabaseHealth.responseTime
     });
-    
+
     return {
       status,
       timestamp: new Date().toISOString(),
@@ -128,17 +139,16 @@ export async function performHealthCheck(): Promise<SystemHealthStatus> {
       uptime: Math.floor(process.uptime()),
       environment: process.env.NODE_ENV || 'development',
       services: {
-        database: databaseHealth,
-        redis: redisHealth,
+        supabase: supabaseHealth,
         memory: memoryStats,
         cpu: cpuStats
       }
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown health check error';
-    
+
     logger.error('Health check failed', { error: errorMessage });
-    
+
     return {
       status: 'unhealthy',
       timestamp: new Date().toISOString(),
@@ -146,8 +156,7 @@ export async function performHealthCheck(): Promise<SystemHealthStatus> {
       uptime: Math.floor(process.uptime()),
       environment: process.env.NODE_ENV || 'development',
       services: {
-        database: { connected: false, responseTime: 0, poolStats: null, error: errorMessage },
-        redis: { connected: false, responseTime: 0, error: errorMessage },
+        supabase: { connected: false, responseTime: 0, error: errorMessage, authReachable: false },
         memory: getMemoryStats(),
         cpu: getCpuStats()
       }
@@ -171,23 +180,23 @@ export function performLivenessCheck() {
  */
 export async function performReadinessCheck() {
   try {
-    const databaseHealth = await checkDatabaseHealth();
-    
-    if (!databaseHealth.connected) {
+    const supabaseHealth = await checkSupabaseHealth();
+
+    if (!supabaseHealth.connected) {
       return {
         status: 'not_ready',
         timestamp: new Date().toISOString(),
-        reason: 'Database not available'
+        reason: 'Supabase not available'
       };
     }
-    
+
     return {
       status: 'ready',
       timestamp: new Date().toISOString()
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown readiness check error';
-    
+
     return {
       status: 'not_ready',
       timestamp: new Date().toISOString(),
