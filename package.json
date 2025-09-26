@@ -14,7 +14,16 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "migrate": "ts-node src/scripts/migrate.ts up",
     "migrate:rollback": "ts-node src/scripts/migrate.ts down",
-    "migrate:status": "ts-node src/scripts/migrate.ts status"
+    "migrate:status": "ts-node src/scripts/migrate.ts status",
+    "seed": "ts-node src/scripts/seed.ts run",
+    "seed:clear": "ts-node src/scripts/seed.ts clear",
+    "deploy:dev": "scripts/deploy.sh -e development",
+    "deploy:staging": "scripts/deploy.sh -e staging",
+    "deploy:prod": "scripts/deploy.sh -e production",
+    "docker:build": "docker build -t employee-management:latest .",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f app"
   },
   "keywords": [
     "employee",

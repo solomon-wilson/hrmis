@@ -4,12 +4,21 @@ import helmet from 'helmet';
 import { employeeRoutes } from './routes/employeeRoutes';
 import { managerRoutes } from './routes/managerRoutes';
 import { employeeSelfServiceRoutes } from './routes/employeeSelfServiceRoutes';
+import { monitoringRoutes } from './routes/monitoringRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
 import { correlationIdMiddleware } from './middleware/correlationId';
+import { 
+  performanceMonitoring, 
+  apiUsageTracking, 
+  concurrencyMonitoring, 
+  errorRateMonitoring 
+} from './middleware/performanceMonitoring';
+import { errorTrackingMiddleware } from './utils/errorTracking';
 import { applySecurity, securityHeaders, requestSizeLimit, requestTimeout } from './middleware/security';
 import { sanitizeInput, validateContentType } from './middleware/inputValidation';
 import { generalRateLimit } from './middleware/rateLimiting';
+import { performHealthCheck, performLivenessCheck, performReadinessCheck } from './services/healthService';
 
 export const createApp = (): express.Application => {
   const app = express();
@@ -53,22 +62,58 @@ export const createApp = (): express.Application => {
   // Input sanitization
   app.use(sanitizeInput);
 
+  // Performance monitoring middleware
+  app.use(performanceMonitoring);
+  app.use(concurrencyMonitoring);
+  app.use(errorRateMonitoring);
+  app.use(apiUsageTracking);
+
   // Request logging
   app.use(requestLogger);
 
-  // Health check endpoint
-  app.get('/health', (_req, res) => {
-    res.json({
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      version: process.env.npm_package_version || '1.0.0'
-    });
+  // Health check endpoints
+  app.get('/health', async (_req, res) => {
+    try {
+      const healthStatus = await performHealthCheck();
+      const statusCode = healthStatus.status === 'healthy' ? 200 : 
+                        healthStatus.status === 'degraded' ? 200 : 503;
+      
+      res.status(statusCode).json(healthStatus);
+    } catch (error) {
+      res.status(503).json({
+        status: 'unhealthy',
+        timestamp: new Date().toISOString(),
+        error: 'Health check failed'
+      });
+    }
+  });
+
+  // Liveness probe endpoint (simple check)
+  app.get('/health/live', (_req, res) => {
+    const livenessStatus = performLivenessCheck();
+    res.status(livenessStatus.status === 'alive' ? 200 : 503).json(livenessStatus);
+  });
+
+  // Readiness probe endpoint (checks dependencies)
+  app.get('/health/ready', async (_req, res) => {
+    try {
+      const readinessStatus = await performReadinessCheck();
+      const statusCode = readinessStatus.status === 'ready' ? 200 : 503;
+      res.status(statusCode).json(readinessStatus);
+    } catch (error) {
+      res.status(503).json({
+        status: 'not_ready',
+        timestamp: new Date().toISOString(),
+        error: 'Readiness check failed'
+      });
+    }
   });
 
   // API routes
   app.use('/api/employees', employeeRoutes);
   app.use('/api/employees', employeeSelfServiceRoutes); // Self-service routes under /api/employees/me
   app.use('/api/managers', managerRoutes);
+  app.use('/api/monitoring', monitoringRoutes);
 
   // 404 handler
   app.use('*', (req, res) => {
@@ -79,6 +124,9 @@ export const createApp = (): express.Application => {
       }
     });
   });
+
+  // Error tracking middleware (before error handler)
+  app.use(errorTrackingMiddleware);
 
   // Global error handler
   app.use(errorHandler);

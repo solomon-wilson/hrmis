@@ -4,7 +4,7 @@ import { Migration } from '../index';
 export const createDepartmentsTable: Migration = {
   id: '004',
   name: 'Create departments table',
-  
+
   async up(client: PoolClient): Promise<void> {
     const query = `
       CREATE TABLE IF NOT EXISTS departments (

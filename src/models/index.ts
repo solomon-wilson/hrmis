@@ -2,7 +2,7 @@
 export * from './Employee';
 export * from './PersonalInfo';
 export * from './JobInfo';
-export * from './EmployeeStatus';
-export * from './EmployeeStatusHistory';
+export { EmployeeStatus } from './EmployeeStatus';
+export { EmployeeStatusHistory, EmployeeStatusType } from './EmployeeStatusHistory';
 export * from './AuditLog';
 export * from './User';

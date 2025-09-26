@@ -2,10 +2,10 @@
 export * from './models';
 export * from './services';
 export * from './controllers';
-export * from './database';
+export { database } from './database';
 export * from './middleware';
-export * from './utils';
-export * from './app';
+export { logger, ValidationError } from './utils';
+export { createApp } from './app';
 
 // Start server if this file is run directly
 if (require.main === module) {

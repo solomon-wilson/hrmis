@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: employee-management-service
+  namespace: employee-management
+  labels:
+    app: employee-management
+    component: api
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 3000
+    protocol: TCP
+    name: http
+  selector:
+    app: employee-management
+    component: api
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-service
+  namespace: employee-management
+  labels:
+    app: postgresql
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgresql
+  selector:
+    app: postgresql
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: employee-management
+  labels:
+    app: redis
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+    protocol: TCP
+    name: redis
+  selector:
+    app: redis

@@ -1,159 +1,143 @@
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { database } from '../../database/connection';
-import { runM
-};);Environment(downTesttearp.estSetutegrationT
-  await In<void> => {): Promisets = async (ionTesegratIntnst teardown
+import { migrationRunner } from '../../database/migrations';
+import { logger } from '../../utils/logger';
 
-export co);
-};ronment(tupTestEnviSetup.seationTestawait Integrid> => {
-  : Promise<vo async ()ionTests =tupIntegratsest export con
-st for Jeteardown setup and 
+// Global test container instance
+let postgresContainer: StartedPostgreSqlContainer;
 
-// Global
-  }
-},
-    };tPassword()ner.geaiesContis.postgrpassword: th      ame(),
-rnetUseContainer.g.postgresme: this  usernae(),
-    abas.getDatresContainerthis.postg database: 
-     dPort(),irstMappe.getFntainerostgresCort: this.p po     
-etHost(),tainer.gtgresConst: this.pos{
-      hourn 
-    ret
+/**
+ * Integration test setup and teardown
+ */
+export const IntegrationTestSetup = {
+  /**
+   * Set up test environment
+   */
+  setupTestEnvironment: async (): Promise<void> => {
+    try {
+      // Start PostgreSQL container
+      postgresContainer = await new PostgreSqlContainer('postgres:15-alpine')
+        .withDatabase('employee_management_test')
+        .withUsername('postgres')
+        .withPassword('test_password')
+        .start();
+
+      // Configure database connection for tests
+      process.env.DB_HOST = postgresContainer.getHost();
+      process.env.DB_PORT = postgresContainer.getFirstMappedPort().toString();
+      process.env.DB_NAME = postgresContainer.getDatabase();
+      process.env.DB_USER = postgresContainer.getUsername();
+      process.env.DB_PASSWORD = postgresContainer.getPassword();
+      process.env.DB_SSL = 'false';
+
+      logger.info('Test container started', {
+        host: postgresContainer.getHost(),
+        port: postgresContainer.getFirstMappedPort(),
+        database: postgresContainer.getDatabase()
+      });
+
+    } catch (error) {
+      logger.error('Failed to start test container', error);
+      throw new Error('Test container not started');
     }
-started');ner not  contairor('Test new Er      thrower) {
-resContainostg(!this.pif 
-     {Info()aseDatabc getTestati st
-  */n info
-  connectiot database  * Get tes  /**
-  
-
-   }
-  }error;
-    throw error);
-   ata', t d seed tes'Failed to.error( logger
-     error) {catch (
-
-    }      `);PLOYEE')
- r-3', 'EM    ('use   ),
-   'MANAGER'ser-2',    ('u),
-       , 'HR_ADMIN'  ('user-1'          VALUES 
-
-      le)r_id, ror_roles (useuseSERT INTO    IN
-     ery(`abase.qu  await dat   
- oleser rt us  // Inser;
-
-      `)())
-    W(), NOWash3', NOb$10$h.com', '$2pany1@comployee, 'eme1' 'employe',-3user        (',
-  (), NOW())sh2', NOWb$10$ha '$2.com',ompany 'manager1@cager1',an-2', 'm    ('user)),
-      NOW(), NOW(ash1', '$2b$10$hom', @company.chr.adminin', 'dm-1', 'hr_a'user  (    LUES 
-          VA
-  updated_at), created_ath, ssword_haspa email, d, username,(iers O us INSERT INT
-       (`uery.qit database     awaers
- t usnsert tes // I  
-
-    `);  NOW())
-   NOW(), partment', ales De'Sales', 'Sept-3',   ('d     OW()),
-   OW(), Nartment', Ns Depan ResourceHum 'R',ept-2', 'H ('d     
-    ()),NOWt', NOW(),  Departmenneeringtware Engi 'Sofineering',ept-1', 'Eng   ('d
-       S    VALUE_at)
-      updatedd_at,tetion, crea descrip (id, name,departmentsINTO      INSERT   `
- query(ase.abait dat      awartments
-ert test dep      // Insy {
- trd> {
-   Promise<voi: TestData() seed asyncstatic   */
-  data
-t  tesSeed
-   *  }
+  },
 
   /**
- ;
-    } throw error);
-     ase', errorlean datab'Failed to cror(er.er  logg  rror) {
-   catch (e);
-
-    }ART WITH 1'q RESTd_seit_logs_i audUENCEEQER Sery('ALTquabase.atait d
-      aw;ART WITH 1')q RESTid_seCE users_ENALTER SEQUe.query('wait databas
-      a);1'ESTART WITH q R_seployees_idCE emER SEQUENy('ALTase.querait databs
-      awet sequence      // Res    
-');
-  ASCADEtments CdeparTE TABLE y('TRUNCAase.querait datab  awE');
-    ers CASCADusCATE TABLE ('TRUNuerydatabase.q  await DE');
-    SCA CArolesLE user_TAB'TRUNCATE uery(se.qt databaawai    ADE');
-  s CASCyeeemploABLE E TATRUNC('Tquerybase.t data awai   E');
-  SCADistory CAatus_h_steeABLE employNCATE T.query('TRUait database
-      awCADE');dit_logs CASE TABLE aury('TRUNCATdatabase.que      await  try {
-id> {
-   romise<votabase(): Psync cleanDastatic a  */
-  on
- t isolaties for testablbase  Clean data  *
-  /**
- 
-  }
-  }w error;
-  hro);
-      tment', errorvironn test engratio inteupd to cleanrror('Faileger.e
-      log(error) {  } catch up');
-
-  nt cleaned t environmeesn tratiofo('Integer.in     logglse;
-  faSetup =his.is
-
-      t
-      }top();sContainer.ss.postgreit thi      awa {
-  iner)ostgresConta.phisf (t  i
+   * Tear down test environment
+   */
+  teardownTestEnvironment: async (): Promise<void> => {
+    try {
+      await database.disconnect();
+      if (postgresContainer) {
+        await postgresContainer.stop();
       }
-   ct();
- disconne database.ait      aw{
-  ()) onnectedisCbase.    if (data {
-  
-    tryise<void> {t(): PromironmenstEnvc teardownTesyntatic a s
- nment
-   */est enviro tupClean /**
-   *   }
+    } catch (error) {
+      logger.error('Failed to teardown test environment', error);
+    }
+  },
 
-   }
+  /**
+   * Get test database connection info
+   */
+  getTestDatabaseInfo: () => {
+    if (!postgresContainer) {
+      throw new Error('Test container not started');
+    }
+    
+    return {
+      host: postgresContainer.getHost(),
+      port: postgresContainer.getFirstMappedPort(),
+      database: postgresContainer.getDatabase(),
+      username: postgresContainer.getUsername(),
+      password: postgresContainer.getPassword()
+    };
+  },
 
-  hrow error;  t;
-    error)',  environmentsttegration teetup in to s'Failedror(logger.er) {
-      or(err} catch 
-    ;
-omplete')etup cironment st envtesIntegration nfo('r.igge   lo
-   ue;= trhis.isSetup      t
- ();
-Migrations   await runns
-    migratio    // Run
+  /**
+   * Seed test data
+   */
+  seedTestData: async (): Promise<void> => {
+    try {
+      // Run migrations first
+      await migrationRunner.runMigrations();
+      
+      // Insert test data
+      // This is a simplified version - you can expand based on your needs
+      await database.query(`
+        INSERT INTO roles (id, name, description, created_at, updated_at) 
+        VALUES 
+          ('550e8400-e29b-41d4-a716-446655440001', 'HR_ADMIN', 'HR Administrator', NOW(), NOW()),
+          ('550e8400-e29b-41d4-a716-446655440002', 'MANAGER', 'Manager', NOW(), NOW()),
+          ('550e8400-e29b-41d4-a716-446655440003', 'EMPLOYEE', 'Employee', NOW(), NOW())
+        ON CONFLICT (name) DO NOTHING
+      `);
 
-  onnect();atabase.ct d   awai
-    databaseect to test     // Conn
-  'false';
-SSL =.DB_.env    process  ;
-d()asswortPntainer.geostgresCo = this.pRD.DB_PASSWOs.envproces    rname();
-  er.getUseontain.postgresCthisv.DB_USER = process.ene();
-      Databasntainer.getresCos.postg= thiB_NAME .env.D     process();
- tringdPort().toSetFirstMappe.gContainerstgrespo= this.v.DB_PORT .encess
-      proHost();etainer.gpostgresContis.= th_HOST ocess.env.DB
-      prest database tariables fornvironment v  // Set et();
+      logger.info('Test data seeded successfully');
+    } catch (error) {
+      logger.error('Failed to seed test data', error);
+      throw error;
+    }
+  },
 
-    tar       .s
- rts(5432)thExposedPo   .wi
-     assword')rd('test_phPasswo  .wit     )
- 'test_user'sername(ithU .w     
-  )t'emen_managployeee('test_em.withDatabas    ne')
-    :15-alpigres'postainer(lContw PostgreSq = await neContainerstgres  this.po    ner...');
-contaiest stgreSQL t'Starting Poer.info(     loggner
- L contaitgreSQ/ Start Pos    /y {
-  tr  
-  
-  }return;
-  
-      up) {(this.isSetf   i   {
-e<void> Promisonment():nvirTestEtupsetatic async  s/
-   *tainers
- on test cent withest environmtup tSe* *
-   
-  /* false;
-c isSetup =ivate stati  prntainer;
-qlCortedPostgreSainer: StatgresContstatic poste  privaSetup {
- Testration Integ class;
+  /**
+   * Clean database for test isolation
+   */
+  cleanDatabase: async (): Promise<void> => {
+    try {
+      // Clean tables in reverse order due to foreign key constraints
+      const tables = [
+        'employee_status_history',
+        'employees',
+        'user_roles',
+        'users',
+        'departments',
+        'roles',
+        'audit_logs'
+      ];
 
-exportls/logger' '../../utier } fromggrt { lopotions';
-imtabase/migra../../das } from 'ionigrat
+      for (const table of tables) {
+        await database.query(`TRUNCATE TABLE ${table} RESTART IDENTITY CASCADE`);
+      }
+
+      logger.debug('Database cleaned for test isolation');
+    } catch (error) {
+      logger.error('Failed to clean database', error);
+      throw error;
+    }
+  }
+};
+
+/**
+ * Clean up test environment
+ */
+export const cleanupTestEnvironment = async (): Promise<void> => {
+  await IntegrationTestSetup.teardownTestEnvironment();
+};
+
+// Global setup and teardown for Jest
+export default async (): Promise<void> => {
+  await IntegrationTestSetup.setupTestEnvironment();
+};
+
+// Export for Jest global teardown
+export { cleanupTestEnvironment as teardown };

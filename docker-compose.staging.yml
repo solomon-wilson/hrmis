@@ -1,0 +1,47 @@
+# Docker Compose configuration for staging environment
+
+version: '3.8'
+
+services:
+  app:
+    environment:
+      - NODE_ENV=staging
+      - LOG_LEVEL=info
+      - DEBUG=false
+      - ENABLE_SWAGGER=true
+    restart: unless-stopped
+
+  postgres:
+    environment:
+      - POSTGRES_DB=employee_management_staging
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    volumes:
+      - redis_staging_data:/data
+    restart: unless-stopped
+
+  # Nginx reverse proxy for staging
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/staging.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+    networks:
+      - employee-management-network
+
+volumes:
+  postgres_staging_data:
+  redis_staging_data:
+
+networks:
+  employee-management-network:
+    driver: bridge

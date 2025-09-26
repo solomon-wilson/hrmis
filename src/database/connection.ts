@@ -1,5 +1,6 @@
 import { Pool, PoolClient, PoolConfig } from 'pg';
 import { logger } from '../utils/logger';
+import { MonitoredDatabasePool } from '../middleware/databaseMonitoring';
 
 interface DatabaseConfig {
   host: string;
@@ -15,6 +16,7 @@ interface DatabaseConfig {
 
 class DatabaseConnection {
   private pool: Pool | null = null;
+  private monitoredPool: MonitoredDatabasePool | null = null;
   private config: DatabaseConfig;
 
   constructor() {
@@ -49,6 +51,7 @@ class DatabaseConnection {
       };
 
       this.pool = new Pool(poolConfig);
+      this.monitoredPool = new MonitoredDatabasePool(this.pool);
 
       // Test the connection
       const client = await this.pool.connect();
@@ -89,6 +92,17 @@ class DatabaseConnection {
   }
 
   /**
+   * Get a monitored client from the connection pool
+   */
+  public async getMonitoredClient(correlationId?: string) {
+    if (!this.monitoredPool) {
+      throw new Error('Database not connected. Call connect() first.');
+    }
+
+    return await this.monitoredPool.getClient(correlationId);
+  }
+
+  /**
    * Execute a query with automatic client management
    */
   public async query(text: string, params?: any[]): Promise<any> {
@@ -120,6 +134,17 @@ class DatabaseConnection {
   }
 
   /**
+   * Execute a monitored query with automatic client management
+   */
+  public async monitoredQuery(text: string, params?: any[], correlationId?: string): Promise<any> {
+    if (!this.monitoredPool) {
+      throw new Error('Database not connected. Call connect() first.');
+    }
+
+    return await this.monitoredPool.query(text, params, correlationId);
+  }
+
+  /**
    * Execute a transaction
    */
   public async transaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -143,6 +168,10 @@ class DatabaseConnection {
    * Close the database connection pool
    */
   public async disconnect(): Promise<void> {
+    if (this.monitoredPool) {
+      await this.monitoredPool.end();
+      this.monitoredPool = null;
+    }
     if (this.pool) {
       await this.pool.end();
       this.pool = null;
@@ -170,6 +199,17 @@ class DatabaseConnection {
       idleCount: this.pool.idleCount,
       waitingCount: this.pool.waitingCount,
     };
+  }
+
+  /**
+   * Get monitored pool statistics
+   */
+  public getMonitoredPoolStats() {
+    if (!this.monitoredPool) {
+      return null;
+    }
+
+    return this.monitoredPool.getPoolStats();
   }
 }
 

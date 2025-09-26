@@ -13,7 +13,7 @@ async function startServer() {
   try {
     // Test database connection
     logger.info('Testing database connection...');
-    await database.testConnection();
+    await database.connect();
     logger.info('Database connection successful');
 
     // Create Express app
@@ -36,7 +36,7 @@ async function startServer() {
         logger.info('HTTP server closed');
         
         try {
-          await database.close();
+          await database.disconnect();
           logger.info('Database connections closed');
           process.exit(0);
         } catch (error) {

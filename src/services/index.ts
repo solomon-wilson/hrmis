@@ -1,6 +1,6 @@
 // Export all service classes
-export * from './EmployeeService';
-export * from './AuthService';
-export * from './PermissionManager';
+export { EmployeeService } from './EmployeeService';
+export { AuthService } from './AuthService';
+export { PermissionManager, PermissionContext } from './PermissionManager';
 export * from './ReportService';
 export * from './ExportService';

@@ -1,0 +1,85 @@
+# Docker Compose configuration for production environment
+
+version: '3.8'
+
+services:
+  app:
+    environment:
+      - NODE_ENV=production
+      - LOG_LEVEL=warn
+      - DEBUG=false
+      - ENABLE_SWAGGER=false
+    restart: always
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  postgres:
+    environment:
+      - POSTGRES_DB=employee_management_prod
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+  redis:
+    volumes:
+      - redis_prod_data:/data
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Nginx reverse proxy with SSL
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/production.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - app
+    restart: always
+    networks:
+      - employee-management-network
+
+  # Log aggregation
+  fluentd:
+    image: fluent/fluentd:v1.16-debian-1
+    volumes:
+      - ./logs:/fluentd/log
+      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf
+    depends_on:
+      - app
+    restart: always
+    networks:
+      - employee-management-network
+
+volumes:
+  postgres_prod_data:
+  redis_prod_data:
+
+networks:
+  employee-management-network:
+    driver: bridge

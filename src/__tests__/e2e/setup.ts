@@ -1,12 +1,12 @@
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
 import { createApp } from '../../app';
-import { Express } from 'express';
+import { Application } from 'express';
 import { runMigrations } from '../../database/migrations/migrationRunner';
 import { logger } from '../../utils/logger';
 
 export interface TestContext {
-  app: Express;
+  app: Application;
   dbContainer: StartedPostgreSqlContainer;
   dbPool: Pool;
   cleanup: () => Promise<void>;
@@ -112,7 +112,7 @@ export const createTestEmployee = async (dbPool: Pool, employeeData: any) => {
   return result.rows[0];
 };
 
-export const authenticateUser = async (app: Express, email: string, password: string) => {
+export const authenticateUser = async (app: Application, email: string, password: string) => {
   const request = require('supertest');
   const response = await request(app)
     .post('/api/auth/login')
