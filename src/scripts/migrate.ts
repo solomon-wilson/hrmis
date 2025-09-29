@@ -59,10 +59,10 @@ async function showMigrationStatus() {
     
     console.log('\n=== Migration Status ===');
     console.log(`Executed migrations: ${status.executed.length}`);
-    status.executed.forEach(id => console.log(`  ✓ ${id}`));
-    
+    status.executed.forEach((id: string) => console.log(`  ✓ ${id}`));
+
     console.log(`\nPending migrations: ${status.pending.length}`);
-    status.pending.forEach(id => console.log(`  ○ ${id}`));
+    status.pending.forEach((id: string) => console.log(`  ○ ${id}`));
     
     process.exit(0);
   } catch (error) {

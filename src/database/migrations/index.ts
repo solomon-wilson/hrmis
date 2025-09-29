@@ -77,6 +77,9 @@ class MigrationRunner {
     const createLeaveBalancesTable = await import('./scripts/011_create_leave_balances_table');
     const createPoliciesTable = await import('./scripts/012_create_policies_table');
 
+    // Document Management migrations
+    const createDocumentManagementTables = await import('./scripts/013_create_document_management_tables');
+
     migrations.push(
       createUsersTable,
       createRolesTable,
@@ -114,6 +117,12 @@ class MigrationRunner {
         name: 'create_policies_table',
         up: createPoliciesTable.up,
         down: createPoliciesTable.down
+      },
+      {
+        id: '013',
+        name: 'create_document_management_tables',
+        up: createDocumentManagementTables.up,
+        down: createDocumentManagementTables.down
       }
     );
 

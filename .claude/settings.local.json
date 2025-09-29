@@ -7,7 +7,15 @@
       "Bash(grep:*)",
       "WebSearch",
       "WebFetch(domain:kiro.dev)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(npm run migrate:*)",
+      "Bash(npm run:*)",
+      "Bash(npx ts-node:*)",
+      "Bash(node:*)",
+      "Bash(npm test:*)",
+      "WebFetch(domain:supabase.com)",
+      "Bash(npx supabase:*)"
     ],
     "deny": [],
     "ask": []

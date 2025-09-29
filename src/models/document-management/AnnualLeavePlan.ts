@@ -1,0 +1,429 @@
+import Joi from 'joi';
+import { v4 as uuidv4 } from 'uuid';
+import {
+  validateAndThrow,
+  ValidationError,
+  uuidSchema
+} from '../../utils/validation';
+
+export type AnnualLeaveStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'MANAGER_APPROVED'
+  | 'HR_APPROVED'
+  | 'REJECTED';
+
+export interface PlannedLeave {
+  startDate: Date;
+  endDate: Date;
+  days: number;
+  description?: string;
+  type: 'ANNUAL' | 'PERSONAL' | 'SICK' | 'EMERGENCY';
+}
+
+export interface AnnualLeavePlanData {
+  id?: string;
+  employeeId: string;
+  year: number;
+  totalEntitlement: number;
+  carriedOver: number;
+  plannedLeaves: PlannedLeave[];
+  status: AnnualLeaveStatus;
+  submittedAt?: Date;
+  managerApprovedAt?: Date;
+  managerApprovedBy?: string;
+  hrApprovedAt?: Date;
+  hrApprovedBy?: string;
+  rejectionReason?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export class AnnualLeavePlan {
+  public id: string;
+  public employeeId: string;
+  public year: number;
+  public totalEntitlement: number;
+  public carriedOver: number;
+  public plannedLeaves: PlannedLeave[];
+  public status: AnnualLeaveStatus;
+  public submittedAt?: Date;
+  public managerApprovedAt?: Date;
+  public managerApprovedBy?: string;
+  public hrApprovedAt?: Date;
+  public hrApprovedBy?: string;
+  public rejectionReason?: string;
+  public createdAt: Date;
+  public updatedAt: Date;
+
+  constructor(data: AnnualLeavePlanData) {
+    this.validate(data);
+
+    this.id = data.id || uuidv4();
+    this.employeeId = data.employeeId;
+    this.year = data.year;
+    this.totalEntitlement = data.totalEntitlement;
+    this.carriedOver = data.carriedOver;
+    this.plannedLeaves = data.plannedLeaves.map(leave => ({
+      ...leave,
+      startDate: new Date(leave.startDate),
+      endDate: new Date(leave.endDate)
+    }));
+    this.status = data.status;
+    this.submittedAt = data.submittedAt;
+    this.managerApprovedAt = data.managerApprovedAt;
+    this.managerApprovedBy = data.managerApprovedBy;
+    this.hrApprovedAt = data.hrApprovedAt;
+    this.hrApprovedBy = data.hrApprovedBy;
+    this.rejectionReason = data.rejectionReason?.trim();
+    this.createdAt = data.createdAt || new Date();
+    this.updatedAt = data.updatedAt || new Date();
+
+    this.validateBusinessRules();
+  }
+
+  private validate(data: AnnualLeavePlanData): void {
+    const plannedLeaveSchema = Joi.object({
+      startDate: Joi.date().required(),
+      endDate: Joi.date().required(),
+      days: Joi.number().min(0.5).max(365).required(),
+      description: Joi.string().max(500).optional(),
+      type: Joi.string().valid('ANNUAL', 'PERSONAL', 'SICK', 'EMERGENCY').required()
+    });
+
+    const schema = Joi.object({
+      id: uuidSchema.optional(),
+      employeeId: uuidSchema,
+      year: Joi.number().integer().min(2000).max(2099).required(),
+      totalEntitlement: Joi.number().min(0).max(100).required(),
+      carriedOver: Joi.number().min(0).max(50).required(),
+      plannedLeaves: Joi.array().items(plannedLeaveSchema).required(),
+      status: Joi.string().valid('DRAFT', 'SUBMITTED', 'MANAGER_APPROVED', 'HR_APPROVED', 'REJECTED').required(),
+      submittedAt: Joi.date().optional(),
+      managerApprovedAt: Joi.date().optional(),
+      managerApprovedBy: uuidSchema.optional(),
+      hrApprovedAt: Joi.date().optional(),
+      hrApprovedBy: uuidSchema.optional(),
+      rejectionReason: Joi.string().max(1000).optional(),
+      createdAt: Joi.date().optional(),
+      updatedAt: Joi.date().optional()
+    });
+
+    validateAndThrow<AnnualLeavePlanData>(schema, data);
+  }
+
+  private validateBusinessRules(): void {
+    // Validate year is current or future
+    const currentYear = new Date().getFullYear();
+    if (this.year < currentYear) {
+      throw new ValidationError('Cannot create leave plans for past years', []);
+    }
+
+    // Validate total planned days don't exceed entitlement + carried over
+    const totalPlannedDays = this.getTotalPlannedDays();
+    const totalAvailable = this.totalEntitlement + this.carriedOver;
+
+    if (totalPlannedDays > totalAvailable) {
+      throw new ValidationError(
+        `Total planned days (${totalPlannedDays}) exceed available entitlement (${totalAvailable})`,
+        []
+      );
+    }
+
+    // Validate planned leave dates
+    this.plannedLeaves.forEach((leave, index) => {
+      if (leave.endDate < leave.startDate) {
+        throw new ValidationError(`Leave ${index + 1}: End date must be after or equal to start date`, []);
+      }
+
+      // Validate leave is within the plan year
+      const leaveYear = leave.startDate.getFullYear();
+      if (leaveYear !== this.year) {
+        throw new ValidationError(`Leave ${index + 1}: Leave dates must be within plan year ${this.year}`, []);
+      }
+
+      // Validate calculated days match the period
+      const calculatedDays = this.calculateWorkingDays(leave.startDate, leave.endDate);
+      if (Math.abs(leave.days - calculatedDays) > 0.1) {
+        throw new ValidationError(
+          `Leave ${index + 1}: Declared days (${leave.days}) don't match calculated days (${calculatedDays})`,
+          []
+        );
+      }
+    });
+
+    // Check for overlapping leave periods
+    this.validateNoOverlappingLeaves();
+
+    // Validate status-specific requirements
+    this.validateStatusConsistency();
+  }
+
+  private validateNoOverlappingLeaves(): void {
+    const sortedLeaves = [...this.plannedLeaves].sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+
+    for (let i = 0; i < sortedLeaves.length - 1; i++) {
+      const current = sortedLeaves[i];
+      const next = sortedLeaves[i + 1];
+
+      if (current.endDate >= next.startDate) {
+        throw new ValidationError(
+          `Overlapping leave periods detected: ${current.startDate.toDateString()} - ${current.endDate.toDateString()} and ${next.startDate.toDateString()} - ${next.endDate.toDateString()}`,
+          []
+        );
+      }
+    }
+  }
+
+  private validateStatusConsistency(): void {
+    switch (this.status) {
+      case 'SUBMITTED':
+        if (!this.submittedAt) {
+          throw new ValidationError('Submitted plans must have submittedAt date', []);
+        }
+        break;
+
+      case 'MANAGER_APPROVED':
+        if (!this.managerApprovedAt || !this.managerApprovedBy) {
+          throw new ValidationError('Manager approved plans must have approval date and approver', []);
+        }
+        break;
+
+      case 'HR_APPROVED':
+        if (!this.hrApprovedAt || !this.hrApprovedBy) {
+          throw new ValidationError('HR approved plans must have approval date and approver', []);
+        }
+        if (!this.managerApprovedAt || !this.managerApprovedBy) {
+          throw new ValidationError('HR approved plans must also have manager approval', []);
+        }
+        break;
+
+      case 'REJECTED':
+        if (!this.rejectionReason) {
+          throw new ValidationError('Rejected plans must have a rejection reason', []);
+        }
+        break;
+    }
+  }
+
+  private calculateWorkingDays(startDate: Date, endDate: Date): number {
+    // Simple implementation - could be enhanced to exclude holidays
+    let days = 0;
+    const current = new Date(startDate);
+
+    // Include both start and end date in the calculation
+    while (current <= endDate) {
+      const dayOfWeek = current.getDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Exclude weekends
+        days++;
+      }
+      current.setDate(current.getDate() + 1);
+    }
+
+    return days;
+  }
+
+  public submit(): AnnualLeavePlan {
+    if (this.status !== 'DRAFT') {
+      throw new ValidationError('Only draft plans can be submitted', []);
+    }
+
+    if (this.plannedLeaves.length === 0) {
+      throw new ValidationError('Cannot submit plan with no planned leaves', []);
+    }
+
+    return new AnnualLeavePlan({
+      ...this.toJSON(),
+      status: 'SUBMITTED',
+      submittedAt: new Date(),
+      updatedAt: new Date()
+    });
+  }
+
+  public approveByManager(managerId: string): AnnualLeavePlan {
+    if (this.status !== 'SUBMITTED') {
+      throw new ValidationError('Only submitted plans can be approved by manager', []);
+    }
+
+    return new AnnualLeavePlan({
+      ...this.toJSON(),
+      status: 'MANAGER_APPROVED',
+      managerApprovedAt: new Date(),
+      managerApprovedBy: managerId,
+      updatedAt: new Date()
+    });
+  }
+
+  public approveByHR(hrId: string): AnnualLeavePlan {
+    if (this.status !== 'MANAGER_APPROVED') {
+      throw new ValidationError('Only manager-approved plans can be approved by HR', []);
+    }
+
+    return new AnnualLeavePlan({
+      ...this.toJSON(),
+      status: 'HR_APPROVED',
+      hrApprovedAt: new Date(),
+      hrApprovedBy: hrId,
+      updatedAt: new Date()
+    });
+  }
+
+  public reject(reason: string): AnnualLeavePlan {
+    if (this.status === 'REJECTED') {
+      throw new ValidationError('Plan is already rejected', []);
+    }
+
+    if (this.status === 'HR_APPROVED') {
+      throw new ValidationError('Cannot reject HR approved plans', []);
+    }
+
+    return new AnnualLeavePlan({
+      ...this.toJSON(),
+      status: 'REJECTED',
+      rejectionReason: reason.trim(),
+      updatedAt: new Date()
+    });
+  }
+
+  public addPlannedLeave(leave: PlannedLeave): AnnualLeavePlan {
+    if (!this.canBeModified()) {
+      throw new ValidationError('Cannot modify plan in current status', []);
+    }
+
+    const newLeaves = [...this.plannedLeaves, leave];
+
+    return new AnnualLeavePlan({
+      ...this.toJSON(),
+      plannedLeaves: newLeaves,
+      updatedAt: new Date()
+    });
+  }
+
+  public updatePlannedLeave(index: number, updates: Partial<PlannedLeave>): AnnualLeavePlan {
+    if (!this.canBeModified()) {
+      throw new ValidationError('Cannot modify plan in current status', []);
+    }
+
+    if (index < 0 || index >= this.plannedLeaves.length) {
+      throw new ValidationError('Invalid leave index', []);
+    }
+
+    const newLeaves = [...this.plannedLeaves];
+    newLeaves[index] = { ...newLeaves[index], ...updates };
+
+    return new AnnualLeavePlan({
+      ...this.toJSON(),
+      plannedLeaves: newLeaves,
+      updatedAt: new Date()
+    });
+  }
+
+  public removePlannedLeave(index: number): AnnualLeavePlan {
+    if (!this.canBeModified()) {
+      throw new ValidationError('Cannot modify plan in current status', []);
+    }
+
+    if (index < 0 || index >= this.plannedLeaves.length) {
+      throw new ValidationError('Invalid leave index', []);
+    }
+
+    const newLeaves = this.plannedLeaves.filter((_, i) => i !== index);
+
+    return new AnnualLeavePlan({
+      ...this.toJSON(),
+      plannedLeaves: newLeaves,
+      updatedAt: new Date()
+    });
+  }
+
+  public getTotalPlannedDays(): number {
+    return this.plannedLeaves.reduce((total, leave) => total + leave.days, 0);
+  }
+
+  public getRemainingDays(): number {
+    return this.totalEntitlement + this.carriedOver - this.getTotalPlannedDays();
+  }
+
+  public getPlannedLeavesByType(type: PlannedLeave['type']): PlannedLeave[] {
+    return this.plannedLeaves.filter(leave => leave.type === type);
+  }
+
+  public getTotalDaysByType(type: PlannedLeave['type']): number {
+    return this.getPlannedLeavesByType(type).reduce((total, leave) => total + leave.days, 0);
+  }
+
+  public canBeModified(): boolean {
+    return this.status === 'DRAFT' || this.status === 'REJECTED';
+  }
+
+  public isApproved(): boolean {
+    return this.status === 'HR_APPROVED';
+  }
+
+  public isPending(): boolean {
+    return this.status === 'SUBMITTED' || this.status === 'MANAGER_APPROVED';
+  }
+
+  public getLeaveConflicts(startDate: Date, endDate: Date): PlannedLeave[] {
+    return this.plannedLeaves.filter(leave => {
+      return (startDate <= leave.endDate && endDate >= leave.startDate);
+    });
+  }
+
+  public hasConflictsWith(startDate: Date, endDate: Date): boolean {
+    return this.getLeaveConflicts(startDate, endDate).length > 0;
+  }
+
+  public toJSON(): AnnualLeavePlanData {
+    return {
+      id: this.id,
+      employeeId: this.employeeId,
+      year: this.year,
+      totalEntitlement: this.totalEntitlement,
+      carriedOver: this.carriedOver,
+      plannedLeaves: this.plannedLeaves.map(leave => ({
+        ...leave,
+        startDate: leave.startDate,
+        endDate: leave.endDate
+      })),
+      status: this.status,
+      submittedAt: this.submittedAt,
+      managerApprovedAt: this.managerApprovedAt,
+      managerApprovedBy: this.managerApprovedBy,
+      hrApprovedAt: this.hrApprovedAt,
+      hrApprovedBy: this.hrApprovedBy,
+      rejectionReason: this.rejectionReason,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt
+    };
+  }
+
+  // Static methods
+  public static createNew(data: Omit<AnnualLeavePlanData, 'id' | 'createdAt' | 'updatedAt' | 'status'>): AnnualLeavePlan {
+    return new AnnualLeavePlan({
+      ...data,
+      status: 'DRAFT',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+  }
+
+  public static fromJSON(data: AnnualLeavePlanData): AnnualLeavePlan {
+    return new AnnualLeavePlan(data);
+  }
+
+  public static createForEmployee(
+    employeeId: string,
+    year: number,
+    totalEntitlement: number,
+    carriedOver: number = 0
+  ): AnnualLeavePlan {
+    return AnnualLeavePlan.createNew({
+      employeeId,
+      year,
+      totalEntitlement,
+      carriedOver,
+      plannedLeaves: []
+    });
+  }
+}

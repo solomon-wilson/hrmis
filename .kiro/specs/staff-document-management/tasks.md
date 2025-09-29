@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Set up database schema and storage infrastructure
+- [X] 1. Set up database schema and storage infrastructure (UPDATED FOR SUPABASE)
 
 
 
@@ -9,23 +9,23 @@
   - Add new enums and types to the database schema
   - _Requirements: 1.1, 2.1, 3.1, 4.1, 6.1, 8.1_
 
-- [ ] 2. Create core data models and validation
-  - [ ] 2.1 Implement StaffDocument model with validation
+- [X] 2. Create core data models and validation
+  - [X] 2.1 Implement StaffDocument model with validation
     - Create StaffDocument TypeScript class with business rules
     - Implement file type and size validation methods
     - Add category-specific validation logic
     - Write unit tests for StaffDocument model validation
     - _Requirements: 2.1, 3.1, 4.1, 6.1_
 
-  - [ ] 2.2 Implement AnnualLeavePlan model
+  - [X] 2.2 Implement AnnualLeavePlan model
     - Create AnnualLeavePlan TypeScript class
     - Implement date validation and conflict detection
     - Add leave balance integration logic
     - Write unit tests for AnnualLeavePlan model
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
 
-- [ ] 3. Implement file storage service layer
-  - [ ] 3.1 Create FileStorageService for Supabase integration
+- [X] 3. Implement file storage service layer
+  - [X] 3.1 Create FileStorageService for Supabase integration
     - Implement file upload methods with path organization
     - Create secure download URL generation
     - Add file deletion and cleanup methods
@@ -33,7 +33,7 @@
     - Write unit tests for FileStorageService
     - _Requirements: 1.1, 2.1, 3.1, 4.1, 6.1, 8.1, 8.4_
 
-  - [ ] 3.2 Implement DocumentService business logic
+  - [X] 3.2 Implement DocumentService business logic
     - Create document upload workflow with metadata handling
     - Implement document retrieval with permission checks
     - Add document listing and filtering capabilities
@@ -41,8 +41,8 @@
     - Write unit tests for DocumentService operations
     - _Requirements: 1.1, 2.1, 3.1, 4.1, 4.2, 4.3, 4.4, 6.1, 6.2, 6.3, 6.4, 8.1, 8.2, 8.3_
 
-- [ ] 4. Create database repositories
-  - [ ] 4.1 Implement StaffDocumentRepository
+- [X] 4. Create database repositories
+  - [X] 4.1 Implement StaffDocumentRepository
     - Create CRUD operations for staff documents
     - Implement category-based filtering and search
     - Add employee document listing with pagination
@@ -50,7 +50,7 @@
     - Write unit tests for repository operations
     - _Requirements: 1.1, 2.1, 3.1, 4.1, 4.5, 6.1, 6.4_
 
-  - [ ] 4.2 Implement AnnualLeavePlanRepository
+  - [X] 4.2 Implement AnnualLeavePlanRepository
     - Create CRUD operations for leave plans
     - Implement year-based filtering and employee lookup
     - Add leave plan approval workflow methods
@@ -58,8 +58,8 @@
     - Write unit tests for leave plan repository
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
 
-- [ ] 5. Implement API controllers and routes
-  - [ ] 5.1 Create StaffDocumentController
+- [X] 5. Implement API controllers and routes
+  - [X] 5.1 Create StaffDocumentController
     - Implement document upload endpoint with multipart handling
     - Create document download endpoint with permission checks
     - Add document listing endpoint with filtering
@@ -67,7 +67,7 @@
     - Write unit tests for controller methods
     - _Requirements: 1.1, 1.2, 2.1, 2.2, 2.3, 3.1, 3.2, 3.3, 4.1, 4.2, 4.3, 4.4, 4.5, 6.1, 6.2, 6.3, 6.4, 8.1, 8.2, 8.3_
 
-  - [ ] 5.2 Create AnnualLeavePlanController
+  - [X] 5.2 Create AnnualLeavePlanController
     - Implement leave plan creation and update endpoints
     - Create leave plan retrieval and listing endpoints
     - Add leave plan approval workflow endpoints

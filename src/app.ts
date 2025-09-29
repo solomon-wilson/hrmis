@@ -5,6 +5,7 @@ import { employeeRoutes } from './routes/employeeRoutes';
 import { managerRoutes } from './routes/managerRoutes';
 import { employeeSelfServiceRoutes } from './routes/employeeSelfServiceRoutes';
 import { monitoringRoutes } from './routes/monitoringRoutes';
+import { documentManagementRoutes } from './routes/document-management';
 import { errorHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
 import { correlationIdMiddleware } from './middleware/correlationId';
@@ -114,6 +115,7 @@ export const createApp = (): express.Application => {
   app.use('/api/employees', employeeSelfServiceRoutes); // Self-service routes under /api/employees/me
   app.use('/api/managers', managerRoutes);
   app.use('/api/monitoring', monitoringRoutes);
+  app.use('/api/document-management', documentManagementRoutes);
 
   // 404 handler
   app.use('*', (req, res) => {

@@ -9,3 +9,6 @@ export * from './User';
 
 // Time and Attendance models
 export * from './time-attendance';
+
+// Document Management models
+export * from './document-management';

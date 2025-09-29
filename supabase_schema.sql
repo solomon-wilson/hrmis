@@ -29,6 +29,37 @@ CREATE TYPE time_entry_status AS ENUM ('ACTIVE', 'COMPLETED', 'PENDING_APPROVAL'
 -- Break type enum
 CREATE TYPE break_type AS ENUM ('LUNCH', 'SHORT_BREAK', 'PERSONAL');
 
+-- Document management enums
+CREATE TYPE document_category AS ENUM (
+  'PERSONAL_IDENTIFICATION',
+  'EMPLOYMENT_CONTRACT',
+  'QUALIFICATION_CERTIFICATE',
+  'TRAINING_RECORD',
+  'PERFORMANCE_REVIEW',
+  'PASSPORT_PHOTO',
+  'EMERGENCY_CONTACT',
+  'BANK_DETAILS',
+  'TAX_INFORMATION',
+  'INSURANCE_DOCUMENT',
+  'OTHER'
+);
+
+CREATE TYPE document_status AS ENUM (
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
+  'EXPIRED',
+  'ARCHIVED'
+);
+
+CREATE TYPE annual_leave_status AS ENUM (
+  'DRAFT',
+  'SUBMITTED',
+  'MANAGER_APPROVED',
+  'HR_APPROVED',
+  'REJECTED'
+);
+
 -- =============================================
 -- UTILITY FUNCTIONS
 -- =============================================
@@ -256,6 +287,80 @@ CREATE TABLE policies (
 );
 
 -- =============================================
+-- DOCUMENT MANAGEMENT TABLES
+-- =============================================
+
+-- Staff documents table
+CREATE TABLE staff_documents (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  category document_category NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  file_name VARCHAR(255) NOT NULL,
+  file_path VARCHAR(500) NOT NULL,
+  file_size BIGINT NOT NULL,
+  mime_type VARCHAR(100) NOT NULL,
+  status document_status NOT NULL DEFAULT 'PENDING',
+  uploaded_by UUID NOT NULL REFERENCES employees(id),
+  approved_by UUID REFERENCES employees(id),
+  approved_at TIMESTAMP WITH TIME ZONE,
+  expires_at TIMESTAMP WITH TIME ZONE,
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+
+  -- Constraints
+  CONSTRAINT chk_staff_documents_file_size CHECK (file_size > 0),
+  CONSTRAINT chk_staff_documents_approval CHECK (
+    (status = 'APPROVED' AND approved_by IS NOT NULL AND approved_at IS NOT NULL) OR
+    (status != 'APPROVED')
+  )
+);
+
+-- Annual leave plans table
+CREATE TABLE annual_leave_plans (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  year INTEGER NOT NULL,
+  total_entitlement DECIMAL(5,2) NOT NULL,
+  carried_over DECIMAL(5,2) NOT NULL DEFAULT 0,
+  planned_leaves JSONB NOT NULL DEFAULT '[]',
+  status annual_leave_status NOT NULL DEFAULT 'DRAFT',
+  submitted_at TIMESTAMP WITH TIME ZONE,
+  manager_approved_at TIMESTAMP WITH TIME ZONE,
+  manager_approved_by UUID REFERENCES employees(id),
+  hr_approved_at TIMESTAMP WITH TIME ZONE,
+  hr_approved_by UUID REFERENCES employees(id),
+  rejection_reason TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+
+  -- Constraints
+  CONSTRAINT chk_annual_leave_plans_year CHECK (year >= 2000 AND year <= 2099),
+  CONSTRAINT chk_annual_leave_plans_entitlement CHECK (total_entitlement >= 0),
+  CONSTRAINT chk_annual_leave_plans_carried_over CHECK (carried_over >= 0),
+  CONSTRAINT uq_annual_leave_plans_employee_year UNIQUE (employee_id, year)
+);
+
+-- Document version history table for audit trail
+CREATE TABLE document_version_history (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  document_id UUID NOT NULL REFERENCES staff_documents(id) ON DELETE CASCADE,
+  version_number INTEGER NOT NULL DEFAULT 1,
+  action VARCHAR(50) NOT NULL, -- 'CREATED', 'UPDATED', 'APPROVED', 'REJECTED', 'DELETED'
+  changes JSONB DEFAULT '{}',
+  previous_status document_status,
+  new_status document_status,
+  performed_by UUID NOT NULL REFERENCES employees(id),
+  performed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  reason TEXT,
+
+  -- Constraints
+  CONSTRAINT chk_document_version_history_version CHECK (version_number > 0)
+);
+
+-- =============================================
 -- INDEXES FOR PERFORMANCE
 -- =============================================
 
@@ -316,6 +421,26 @@ CREATE INDEX idx_policies_category ON policies(category);
 CREATE INDEX idx_policies_effective_date ON policies(effective_date);
 CREATE INDEX idx_policies_active ON policies(is_active);
 
+-- Staff documents indexes
+CREATE INDEX idx_staff_documents_employee ON staff_documents(employee_id);
+CREATE INDEX idx_staff_documents_category ON staff_documents(category);
+CREATE INDEX idx_staff_documents_status ON staff_documents(status);
+CREATE INDEX idx_staff_documents_uploaded_by ON staff_documents(uploaded_by);
+CREATE INDEX idx_staff_documents_expires_at ON staff_documents(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX idx_staff_documents_created_at ON staff_documents(created_at);
+
+-- Annual leave plans indexes
+CREATE INDEX idx_annual_leave_plans_employee ON annual_leave_plans(employee_id);
+CREATE INDEX idx_annual_leave_plans_year ON annual_leave_plans(year);
+CREATE INDEX idx_annual_leave_plans_status ON annual_leave_plans(status);
+CREATE INDEX idx_annual_leave_plans_created_at ON annual_leave_plans(created_at);
+
+-- Document version history indexes
+CREATE INDEX idx_document_version_history_document ON document_version_history(document_id);
+CREATE INDEX idx_document_version_history_performed_by ON document_version_history(performed_by);
+CREATE INDEX idx_document_version_history_performed_at ON document_version_history(performed_at);
+CREATE INDEX idx_document_version_history_action ON document_version_history(action);
+
 -- =============================================
 -- TRIGGERS FOR UPDATED_AT
 -- =============================================
@@ -368,6 +493,18 @@ CREATE TRIGGER update_policies_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
+-- Staff documents
+CREATE TRIGGER update_staff_documents_updated_at
+  BEFORE UPDATE ON staff_documents
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- Annual leave plans
+CREATE TRIGGER update_annual_leave_plans_updated_at
+  BEFORE UPDATE ON annual_leave_plans
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
 -- =============================================
 -- FOREIGN KEY CONSTRAINTS (Deferred)
 -- =============================================
@@ -393,6 +530,9 @@ ALTER TABLE leave_types ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_balances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE policies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE staff_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE annual_leave_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_version_history ENABLE ROW LEVEL SECURITY;
 
 -- Helper function to get user roles from metadata
 CREATE OR REPLACE FUNCTION get_user_roles()
@@ -530,6 +670,83 @@ CREATE POLICY "Employees can manage their break entries" ON break_entries
       SELECT id FROM time_entries WHERE employee_id = get_user_employee_id()
     ) OR is_hr_admin()
   );
+
+-- Staff documents policies
+CREATE POLICY "Employees can view their own documents and HR can view all" ON staff_documents
+  FOR SELECT USING (
+    employee_id = get_user_employee_id() OR
+    is_hr_admin() OR
+    is_manager()
+  );
+
+CREATE POLICY "Employees can upload their own documents" ON staff_documents
+  FOR INSERT WITH CHECK (
+    employee_id = get_user_employee_id()
+  );
+
+CREATE POLICY "Employees can update their own pending documents" ON staff_documents
+  FOR UPDATE USING (
+    employee_id = get_user_employee_id() AND status = 'PENDING'
+  ) WITH CHECK (
+    employee_id = get_user_employee_id()
+  );
+
+CREATE POLICY "HR can approve/reject documents" ON staff_documents
+  FOR UPDATE USING (is_hr_admin())
+  WITH CHECK (is_hr_admin());
+
+CREATE POLICY "Employees can delete their own pending documents" ON staff_documents
+  FOR DELETE USING (
+    employee_id = get_user_employee_id() AND status = 'PENDING'
+  );
+
+CREATE POLICY "HR can delete any document" ON staff_documents
+  FOR DELETE USING (is_hr_admin());
+
+-- Annual leave plans policies
+CREATE POLICY "Employees can view their own leave plans and HR can view all" ON annual_leave_plans
+  FOR SELECT USING (
+    employee_id = get_user_employee_id() OR
+    is_hr_admin() OR
+    is_manager()
+  );
+
+CREATE POLICY "Employees can create their own leave plans" ON annual_leave_plans
+  FOR INSERT WITH CHECK (
+    employee_id = get_user_employee_id()
+  );
+
+CREATE POLICY "Employees can update their own draft leave plans" ON annual_leave_plans
+  FOR UPDATE USING (
+    employee_id = get_user_employee_id() AND status = 'DRAFT'
+  ) WITH CHECK (
+    employee_id = get_user_employee_id()
+  );
+
+CREATE POLICY "HR can approve/reject leave plans" ON annual_leave_plans
+  FOR UPDATE USING (is_hr_admin())
+  WITH CHECK (is_hr_admin());
+
+CREATE POLICY "Managers can approve leave plans for their reports" ON annual_leave_plans
+  FOR UPDATE USING (
+    is_manager() AND
+    employee_id IN (SELECT id FROM employees WHERE manager_id = get_user_employee_id())
+  ) WITH CHECK (
+    is_manager() AND
+    employee_id IN (SELECT id FROM employees WHERE manager_id = get_user_employee_id())
+  );
+
+-- Document version history policies
+CREATE POLICY "Users can view document history for documents they can access" ON document_version_history
+  FOR SELECT USING (
+    document_id IN (
+      SELECT id FROM staff_documents
+      WHERE employee_id = get_user_employee_id() OR is_hr_admin() OR is_manager()
+    )
+  );
+
+CREATE POLICY "Only system can insert document history" ON document_version_history
+  FOR INSERT WITH CHECK (false); -- Only triggers/functions can insert
 
 -- =============================================
 -- INITIAL DATA
