@@ -328,6 +328,62 @@ async function runSeed(): Promise<void> {
     const departments = await seedDepartments();
     const users = await seedUsers(departments);
     await seedEmployees(users, departments);
+
+    // Seed document management sample data (if tables exist)
+    try {
+      const { rows } = await database.query(`
+        SELECT to_regclass('public.staff_documents') as has_docs,
+               to_regclass('public.annual_leave_plans') as has_leave
+      `);
+      const hasDocs = !!rows[0].has_docs;
+      const hasLeave = !!rows[0].has_leave;
+
+      if (hasDocs) {
+        logger.info('Seeding sample staff documents...');
+        // Attach a sample metadata-only row (file paths are placeholders for dev)
+        await database.query(
+          `INSERT INTO staff_documents (
+             id, employee_id, category, title, description, file_name, file_path,
+             file_size, mime_type, status, uploaded_by, metadata, created_at, updated_at
+           ) VALUES (
+             gen_random_uuid(),
+             (SELECT id FROM employees LIMIT 1),
+             'EMPLOYMENT_CONTRACT',
+             'Employment Contract',
+             'Seeded sample document',
+             'contract.pdf',
+             'employees/sample/contract.pdf',
+             1024,
+             'application/pdf',
+             'PENDING',
+             (SELECT id FROM users WHERE email = 'admin@company.com' LIMIT 1),
+             '{"seed": true}',
+             NOW(), NOW()
+           ) ON CONFLICT DO NOTHING`
+        );
+      }
+
+      if (hasLeave) {
+        logger.info('Seeding sample annual leave plan...');
+        await database.query(
+          `INSERT INTO annual_leave_plans (
+             id, employee_id, year, total_entitlement, carried_over, planned_leaves,
+             status, created_at, updated_at
+           ) VALUES (
+             gen_random_uuid(),
+             (SELECT id FROM employees LIMIT 1),
+             EXTRACT(YEAR FROM NOW())::int,
+             30,
+             0,
+             '[{"startDate":"2025-06-10","endDate":"2025-06-15","type":"ANNUAL","days":5}]',
+             'DRAFT',
+             NOW(), NOW()
+           ) ON CONFLICT DO NOTHING`
+        );
+      }
+    } catch (e) {
+      logger.warn('Skipping document/leave seed (tables may not exist yet)', e);
+    }
     
     logger.info('Database seeding completed successfully');
   } catch (error) {

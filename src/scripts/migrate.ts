@@ -1,7 +1,7 @@
 #!/usr/bin/env ts-node
 
 import dotenv from 'dotenv';
-import { database, migrationRunner } from '../database';
+import { supabase } from '../database/supabase';
 import { logger } from '../utils/logger';
 
 // Load environment variables
@@ -9,67 +9,47 @@ dotenv.config();
 
 async function runMigrations() {
   try {
-    logger.info('Starting database migration...');
-    
-    // Connect to database
-    await database.connect();
-    
-    // Run migrations
-    await migrationRunner.runMigrations();
-    
-    logger.info('Database migration completed successfully');
+    logger.info('Connecting to Supabase...');
+    await supabase.connect();
+    logger.info('Supabase connection OK.');
+    logger.info('Note: Apply schema changes via Supabase SQL (CLI or Dashboard).');
+    logger.info('For local setup, run: supabase db push (if using local dev), or run the SQL in supabase.com project.');
     process.exit(0);
   } catch (error) {
     logger.error('Database migration failed', error);
     process.exit(1);
   } finally {
-    await database.disconnect();
+    await supabase.disconnect();
   }
 }
 
 async function rollbackMigration() {
   try {
-    logger.info('Starting migration rollback...');
-    
-    // Connect to database
-    await database.connect();
-    
-    // Rollback last migration
-    await migrationRunner.rollbackLastMigration();
-    
-    logger.info('Migration rollback completed successfully');
+    logger.info('Rollback is managed in Supabase via SQL migrations/history.');
+    await supabase.connect();
+    logger.info('Connected to Supabase; please run rollback SQL via Dashboard/CLI.');
     process.exit(0);
   } catch (error) {
     logger.error('Migration rollback failed', error);
     process.exit(1);
   } finally {
-    await database.disconnect();
+    await supabase.disconnect();
   }
 }
 
 async function showMigrationStatus() {
   try {
-    logger.info('Checking migration status...');
-    
-    // Connect to database
-    await database.connect();
-    
-    // Get migration status
-    const status = await migrationRunner.getMigrationStatus();
-    
-    console.log('\n=== Migration Status ===');
-    console.log(`Executed migrations: ${status.executed.length}`);
-    status.executed.forEach((id: string) => console.log(`  ✓ ${id}`));
-
-    console.log(`\nPending migrations: ${status.pending.length}`);
-    status.pending.forEach((id: string) => console.log(`  ○ ${id}`));
+    logger.info('Checking Supabase availability...');
+    await supabase.connect();
+    console.log('\nSupabase is reachable.');
+    console.log('Migration status should be checked via Supabase migration history (CLI or Dashboard).');
     
     process.exit(0);
   } catch (error) {
     logger.error('Failed to get migration status', error);
     process.exit(1);
   } finally {
-    await database.disconnect();
+    await supabase.disconnect();
   }
 }
 

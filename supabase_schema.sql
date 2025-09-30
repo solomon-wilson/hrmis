@@ -4,8 +4,15 @@
 -- This file contains the complete database schema for Supabase
 -- Run this in your Supabase SQL editor to set up the database
 
--- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- Enable required extensions (Supabase supports pgcrypto for UUIDs)
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- Compatibility shim for projects previously using uuid-ossp
+-- Allows existing DEFAULT uuid_generate_v4() to work by delegating to gen_random_uuid()
+CREATE OR REPLACE FUNCTION uuid_generate_v4()
+RETURNS uuid AS $$
+  SELECT gen_random_uuid();
+$$ LANGUAGE sql IMMUTABLE;
 
 -- =============================================
 -- CUSTOM TYPES
@@ -79,7 +86,7 @@ $$ language 'plpgsql';
 
 -- Departments table
 CREATE TABLE departments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(200) UNIQUE NOT NULL,
   description TEXT,
   manager_id UUID, -- Will add foreign key after employees table
@@ -93,7 +100,7 @@ CREATE TABLE departments (
 
 -- Employees table
 CREATE TABLE employees (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id VARCHAR(20) UNIQUE NOT NULL,
 
   -- Personal Information
@@ -146,7 +153,7 @@ CREATE TABLE employees (
 
 -- Employee status history table
 CREATE TABLE employee_status_history (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   previous_status employee_status,
   new_status employee_status NOT NULL,
@@ -159,7 +166,7 @@ CREATE TABLE employee_status_history (
 
 -- Audit logs table
 CREATE TABLE audit_logs (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   entity_type VARCHAR(50) NOT NULL,
   entity_id UUID NOT NULL,
   action VARCHAR(50) NOT NULL,
@@ -177,7 +184,7 @@ CREATE TABLE audit_logs (
 
 -- Time entries table
 CREATE TABLE time_entries (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   clock_in_time TIMESTAMP WITH TIME ZONE NOT NULL,
   clock_out_time TIMESTAMP WITH TIME ZONE,
@@ -198,7 +205,7 @@ CREATE TABLE time_entries (
 
 -- Break entries table
 CREATE TABLE break_entries (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   time_entry_id UUID NOT NULL REFERENCES time_entries(id) ON DELETE CASCADE,
   break_type break_type NOT NULL,
   start_time TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -211,7 +218,7 @@ CREATE TABLE break_entries (
 
 -- Leave types table
 CREATE TABLE leave_types (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(100) UNIQUE NOT NULL,
   leave_type leave_type_enum NOT NULL,
   description TEXT,
@@ -228,7 +235,7 @@ CREATE TABLE leave_types (
 
 -- Leave requests table
 CREATE TABLE leave_requests (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   leave_type_id UUID NOT NULL REFERENCES leave_types(id),
   start_date DATE NOT NULL,
@@ -248,7 +255,7 @@ CREATE TABLE leave_requests (
 
 -- Leave balances table
 CREATE TABLE leave_balances (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   leave_type_id UUID NOT NULL REFERENCES leave_types(id),
   year INTEGER NOT NULL,
@@ -266,7 +273,7 @@ CREATE TABLE leave_balances (
 
 -- HR policies table
 CREATE TABLE policies (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(200) UNIQUE NOT NULL,
   category VARCHAR(100) NOT NULL,
   description TEXT,
@@ -292,7 +299,7 @@ CREATE TABLE policies (
 
 -- Staff documents table
 CREATE TABLE staff_documents (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   category document_category NOT NULL,
   title VARCHAR(255) NOT NULL,
@@ -345,10 +352,10 @@ CREATE TABLE annual_leave_plans (
 
 -- Document version history table for audit trail
 CREATE TABLE document_version_history (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   document_id UUID NOT NULL REFERENCES staff_documents(id) ON DELETE CASCADE,
   version_number INTEGER NOT NULL DEFAULT 1,
-  action VARCHAR(50) NOT NULL, -- 'CREATED', 'UPDATED', 'APPROVED', 'REJECTED', 'DELETED'
+  action VARCHAR(50) NOT NULL, -- 'CREATED', 'UPDATED', 'STATUS_CHANGE', 'DELETED'
   changes JSONB DEFAULT '{}',
   previous_status document_status,
   new_status document_status,
@@ -359,6 +366,63 @@ CREATE TABLE document_version_history (
   -- Constraints
   CONSTRAINT chk_document_version_history_version CHECK (version_number > 0)
 );
+
+-- Triggers to record document history
+CREATE OR REPLACE FUNCTION log_staff_document_change()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_action VARCHAR(50);
+  v_version INTEGER;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    v_action := 'CREATED';
+    v_version := 1;
+    INSERT INTO document_version_history (
+      document_id, version_number, action, previous_status, new_status,
+      performed_by, reason
+    ) VALUES (
+      NEW.id, v_version, v_action, NULL, NEW.status, NEW.uploaded_by, NULL
+    );
+    RETURN NEW;
+  ELSIF TG_OP = 'UPDATE' THEN
+    v_action := CASE
+      WHEN NEW.status IS DISTINCT FROM OLD.status THEN 'STATUS_CHANGE'
+      ELSE 'UPDATED'
+    END;
+
+    SELECT COALESCE(MAX(version_number) + 1, 1)
+      INTO v_version
+    FROM document_version_history
+    WHERE document_id = NEW.id;
+
+    INSERT INTO document_version_history (
+      document_id, version_number, action, previous_status, new_status,
+      performed_by, reason
+    ) VALUES (
+      NEW.id,
+      v_version,
+      v_action,
+      OLD.status,
+      NEW.status,
+      COALESCE(NEW.approved_by, NEW.uploaded_by),
+      NULL
+    );
+    RETURN NEW;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_staff_documents_insert ON staff_documents;
+CREATE TRIGGER trg_staff_documents_insert
+  AFTER INSERT ON staff_documents
+  FOR EACH ROW EXECUTE FUNCTION log_staff_document_change();
+
+DROP TRIGGER IF EXISTS trg_staff_documents_update ON staff_documents;
+CREATE TRIGGER trg_staff_documents_update
+  AFTER UPDATE ON staff_documents
+  FOR EACH ROW EXECUTE FUNCTION log_staff_document_change();
 
 -- =============================================
 -- INDEXES FOR PERFORMANCE
@@ -537,8 +601,16 @@ ALTER TABLE document_version_history ENABLE ROW LEVEL SECURITY;
 -- Helper function to get user roles from metadata
 CREATE OR REPLACE FUNCTION get_user_roles()
 RETURNS text[] AS $$
+DECLARE
+  roles text[];
 BEGIN
-  RETURN COALESCE((auth.jwt() ->> 'user_metadata')::jsonb ->> 'roles', '[]')::jsonb::text[];
+  -- Extract array of text roles from JWT user_metadata.roles; return empty array if missing
+  SELECT COALESCE(ARRAY(
+    SELECT jsonb_array_elements_text((auth.jwt() -> 'user_metadata' -> 'roles'))
+  ), ARRAY[]::text[])
+  INTO roles;
+
+  RETURN roles;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

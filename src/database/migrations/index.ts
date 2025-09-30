@@ -79,6 +79,7 @@ class MigrationRunner {
 
     // Document Management migrations
     const createDocumentManagementTables = await import('./scripts/013_create_document_management_tables');
+    const { alignSupabaseRls } = await import('./scripts/014_align_supabase_rls');
 
     migrations.push(
       createUsersTable,
@@ -124,6 +125,8 @@ class MigrationRunner {
         up: createDocumentManagementTables.up,
         down: createDocumentManagementTables.down
       }
+      ,
+      alignSupabaseRls
     );
 
     return migrations.sort((a, b) => a.id.localeCompare(b.id));

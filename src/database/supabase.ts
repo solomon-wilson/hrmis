@@ -18,10 +18,6 @@ class SupabaseConnection {
       anonKey: process.env.SUPABASE_ANON_KEY || '',
       serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
     };
-
-    if (!this.config.url || !this.config.anonKey) {
-      throw new Error('Supabase URL and anon key are required');
-    }
   }
 
   /**
@@ -29,6 +25,10 @@ class SupabaseConnection {
    */
   public async connect(): Promise<void> {
     try {
+      // Validate env now (after .env.local is loaded by index.ts)
+      if (!this.config.url || !this.config.anonKey) {
+        throw new Error('Supabase URL and anon key are required');
+      }
       // Create public client (for auth and RLS-protected operations)
       this.client = createClient(this.config.url, this.config.anonKey, {
         auth: {

@@ -1,4 +1,4 @@
-import { database } from './connection';
+import { supabase } from './supabase';
 import { logger } from '../utils/logger';
 
 export interface DatabaseHealthStatus {
@@ -19,31 +19,31 @@ export async function checkDatabaseHealth(): Promise<DatabaseHealthStatus> {
   const startTime = Date.now();
   
   try {
-    if (!database.isConnected()) {
-      return {
-        connected: false,
-        responseTime: 0,
-        poolStats: null,
-        error: 'Database not connected'
-      };
-    }
+    // Ensure Supabase client is connected
+    await supabase.connect();
 
-    // Test database connectivity with a simple query
-    await database.query('SELECT 1 as health_check');
+    // Lightweight head count query
+    const { error } = await supabase
+      .getClient()
+      .from('employees')
+      .select('count', { count: 'exact', head: true });
+
+    if (error && (error as any).code !== 'PGRST116') {
+      throw error;
+    }
     
     const responseTime = Date.now() - startTime;
-    const poolStats = database.getPoolStats();
 
     return {
       connected: true,
       responseTime,
-      poolStats,
+      poolStats: null,
     };
   } catch (error) {
     const responseTime = Date.now() - startTime;
     const errorMessage = error instanceof Error ? error.message : 'Unknown database error';
     
-    logger.error('Database health check failed', { error: errorMessage, responseTime });
+    logger.error('Supabase health check failed', { error: errorMessage, responseTime });
     
     return {
       connected: false,
@@ -59,10 +59,10 @@ export async function checkDatabaseHealth(): Promise<DatabaseHealthStatus> {
  */
 export async function initializeDatabase(): Promise<void> {
   try {
-    logger.info('Initializing database connection...');
+    logger.info('Initializing Supabase connection...');
     
-    // Connect to database
-    await database.connect();
+    // Connect to Supabase
+    await supabase.connect();
     
     // Check health
     const health = await checkDatabaseHealth();
@@ -71,8 +71,7 @@ export async function initializeDatabase(): Promise<void> {
     }
     
     logger.info('Database initialized successfully', {
-      responseTime: health.responseTime,
-      poolStats: health.poolStats
+      responseTime: health.responseTime
     });
     
   } catch (error) {

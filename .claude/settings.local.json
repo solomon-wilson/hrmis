@@ -15,7 +15,9 @@
       "Bash(node:*)",
       "Bash(npm test:*)",
       "WebFetch(domain:supabase.com)",
-      "Bash(npx supabase:*)"
+      "Bash(npx supabase:*)",
+      "Bash(git commit:*)",
+      "Bash(npx eslint:*)"
     ],
     "deny": [],
     "ask": []
