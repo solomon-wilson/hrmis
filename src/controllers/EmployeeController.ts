@@ -450,6 +450,302 @@ export class EmployeeController {
     }
   };
 
+  // ==============================================
+  // DOCUMENT INTEGRATION ENDPOINTS
+  // ==============================================
+
+  /**
+   * Get employee document summary
+   * GET /api/employees/:id/documents/summary
+   */
+  public getEmployeeDocumentSummary = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      if (!req.user?.permissionContext) {
+        res.status(401).json({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required'
+          }
+        });
+        return;
+      }
+
+      const permissionContext = this.convertPermissionContext(req.user.permissionContext);
+      const summary = await this.employeeService.getEmployeeDocumentSummary(id, permissionContext);
+
+      logger.info('Employee document summary retrieved', {
+        employeeId: id,
+        requestedBy: permissionContext.userId
+      });
+
+      res.json({
+        success: true,
+        data: summary
+      });
+
+    } catch (error) {
+      this.handleError(error, res, 'Failed to get employee document summary');
+    }
+  };
+
+  /**
+   * Get employee passport photo
+   * GET /api/employees/:id/passport-photo
+   */
+  public getEmployeePassportPhoto = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      if (!req.user?.permissionContext) {
+        res.status(401).json({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required'
+          }
+        });
+        return;
+      }
+
+      const permissionContext = this.convertPermissionContext(req.user.permissionContext);
+      const photoUrl = await this.employeeService.getEmployeePassportPhoto(id, permissionContext);
+
+      if (!photoUrl) {
+        res.status(404).json({
+          error: {
+            code: 'NOT_FOUND',
+            message: 'No passport photo found for this employee'
+          }
+        });
+        return;
+      }
+
+      logger.info('Employee passport photo retrieved', {
+        employeeId: id,
+        requestedBy: permissionContext.userId
+      });
+
+      res.json({
+        success: true,
+        data: {
+          photoUrl,
+          expiresIn: 3600 // URL expires in 1 hour
+        }
+      });
+
+    } catch (error) {
+      this.handleError(error, res, 'Failed to get employee passport photo');
+    }
+  };
+
+  /**
+   * Check employee document requirements status
+   * GET /api/employees/:id/documents/requirements
+   */
+  public getEmployeeDocumentRequirements = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      if (!req.user?.permissionContext) {
+        res.status(401).json({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required'
+          }
+        });
+        return;
+      }
+
+      const permissionContext = this.convertPermissionContext(req.user.permissionContext);
+      const requirements = await this.employeeService.checkEmployeeDocumentRequirements(id, permissionContext);
+
+      logger.info('Employee document requirements checked', {
+        employeeId: id,
+        requestedBy: permissionContext.userId,
+        isCompliant: requirements.isCompliant,
+        complianceScore: requirements.complianceScore
+      });
+
+      res.json({
+        success: true,
+        data: requirements
+      });
+
+    } catch (error) {
+      this.handleError(error, res, 'Failed to check employee document requirements');
+    }
+  };
+
+  /**
+   * Get employee document statistics for reporting
+   * GET /api/employees/:id/documents/statistics
+   */
+  public getEmployeeDocumentStatistics = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      if (!req.user?.permissionContext) {
+        res.status(401).json({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required'
+          }
+        });
+        return;
+      }
+
+      const permissionContext = this.convertPermissionContext(req.user.permissionContext);
+      const statistics = await this.employeeService.getEmployeeDocumentStatistics(id, permissionContext);
+
+      logger.info('Employee document statistics retrieved', {
+        employeeId: id,
+        requestedBy: permissionContext.userId,
+        totalDocuments: statistics.summary.totalDocuments
+      });
+
+      res.json({
+        success: true,
+        data: statistics
+      });
+
+    } catch (error) {
+      this.handleError(error, res, 'Failed to get employee document statistics');
+    }
+  };
+
+  /**
+   * Get employee self-service document viewing (for logged-in employee)
+   * GET /api/employees/me/documents
+   */
+  public getMyDocuments = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!req.user?.permissionContext) {
+        res.status(401).json({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required'
+          }
+        });
+        return;
+      }
+
+      const permissionContext = this.convertPermissionContext(req.user.permissionContext);
+
+      // Get documents for the authenticated user's employee ID
+      const employeeId = req.user.employeeId || permissionContext.userId;
+      const summary = await this.employeeService.getEmployeeDocumentSummary(employeeId, permissionContext);
+
+      logger.info('Employee self-service documents retrieved', {
+        employeeId,
+        totalDocuments: summary.totalDocuments
+      });
+
+      res.json({
+        success: true,
+        data: {
+          employeeId,
+          summary,
+          selfService: true
+        }
+      });
+
+    } catch (error) {
+      this.handleError(error, res, 'Failed to get self-service documents');
+    }
+  };
+
+  /**
+   * Get employee self-service document requirements
+   * GET /api/employees/me/documents/requirements
+   */
+  public getMyDocumentRequirements = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!req.user?.permissionContext) {
+        res.status(401).json({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required'
+          }
+        });
+        return;
+      }
+
+      const permissionContext = this.convertPermissionContext(req.user.permissionContext);
+
+      // Get requirements for the authenticated user's employee ID
+      const employeeId = req.user.employeeId || permissionContext.userId;
+      const requirements = await this.employeeService.checkEmployeeDocumentRequirements(employeeId, permissionContext);
+
+      logger.info('Employee self-service document requirements retrieved', {
+        employeeId,
+        isCompliant: requirements.isCompliant,
+        complianceScore: requirements.complianceScore
+      });
+
+      res.json({
+        success: true,
+        data: {
+          employeeId,
+          ...requirements,
+          selfService: true,
+          recommendations: this.generateDocumentRecommendations(requirements)
+        }
+      });
+
+    } catch (error) {
+      this.handleError(error, res, 'Failed to get self-service document requirements');
+    }
+  };
+
+  /**
+   * Generate document upload recommendations for employees
+   */
+  private generateDocumentRecommendations(requirements: any): Array<{
+    category: string;
+    priority: 'high' | 'medium' | 'low';
+    action: string;
+    description: string;
+  }> {
+    const recommendations: Array<{
+      category: string;
+      priority: 'high' | 'medium' | 'low';
+      action: string;
+      description: string;
+    }> = [];
+
+    requirements.requiredDocuments.forEach((doc: any) => {
+      if (doc.required && !doc.present) {
+        recommendations.push({
+          category: doc.category,
+          priority: 'high',
+          action: 'Upload required document',
+          description: `Please upload your ${doc.category.toLowerCase().replace('_', ' ')} document`
+        });
+      } else if (doc.present && doc.isExpiringSoon) {
+        recommendations.push({
+          category: doc.category,
+          priority: 'medium',
+          action: 'Update expiring document',
+          description: `Your ${doc.category.toLowerCase().replace('_', ' ')} document expires soon. Please upload an updated version.`
+        });
+      } else if (doc.present && doc.isExpired) {
+        recommendations.push({
+          category: doc.category,
+          priority: 'high',
+          action: 'Replace expired document',
+          description: `Your ${doc.category.toLowerCase().replace('_', ' ')} document has expired. Please upload a new version immediately.`
+        });
+      }
+    });
+
+    // Sort by priority
+    return recommendations.sort((a, b) => {
+      const priorityOrder = { 'high': 0, 'medium': 1, 'low': 2 };
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    });
+  }
+
   /**
    * Error handling helper
    */

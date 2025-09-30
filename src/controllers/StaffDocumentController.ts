@@ -1,7 +1,12 @@
 import { Request, Response } from 'express';
 import multer from 'multer';
+
+interface MulterRequest extends Request {
+  file?: Express.Multer.File;
+}
 import { logger } from '../utils/logger';
-import { ValidationError } from '../utils/validation';
+import { ValidationError } from '../utils/errors';
+import { AppError, FileUploadError } from '../utils/errors';
 import { StaffDocumentRepository, DocumentSearchCriteria, DocumentListOptions } from '../database/repositories/StaffDocumentRepository';
 import { FileStorageService, FileUploadRequest } from '../services/document-management/FileStorageService';
 import { DocumentService, DocumentUploadRequest } from '../services/document-management/DocumentService';
@@ -14,7 +19,7 @@ const upload = multer({
     fileSize: 15 * 1024 * 1024, // 15MB max file size
     files: 1 // Single file upload
   },
-  fileFilter: (req, file, cb) => {
+  fileFilter: (req: any, file: any, cb: any) => {
     // Basic file type validation - more detailed validation happens in FileStorageService
     const allowedMimeTypes = [
       'application/pdf',
@@ -46,7 +51,7 @@ export class StaffDocumentController {
    * Upload a new document
    * POST /api/documents/upload
    */
-  public uploadDocument = async (req: Request, res: Response): Promise<void> => {
+  public uploadDocument = async (req: MulterRequest, res: Response): Promise<void> => {
     try {
       logger.info('Document upload request received', {
         userId: req.user?.id,
@@ -55,12 +60,7 @@ export class StaffDocumentController {
       });
 
       if (!req.file) {
-        res.status(400).json({
-          success: false,
-          message: 'No file uploaded',
-          errors: ['File is required']
-        });
-        return;
+        throw new FileUploadError('No file uploaded', { field: 'file' }, 400);
       }
 
       const {
@@ -71,24 +71,15 @@ export class StaffDocumentController {
         expiresAt
       } = req.body;
 
-      // Validate required fields
+      // Required fields are enforced by validation middleware; keep a safety check
       if (!employeeId || !category || !title) {
-        res.status(400).json({
-          success: false,
-          message: 'Missing required fields',
-          errors: ['employeeId, category, and title are required']
-        });
-        return;
+        throw new ValidationError('Missing required fields', { fields: ['employeeId', 'category', 'title'] });
       }
 
       // Permission check - users can only upload documents for themselves unless they're HR/admin
       const currentUser = req.user!;
-      if (employeeId !== currentUser.employeeId && !currentUser.roles.includes('hr_admin')) {
-        res.status(403).json({
-          success: false,
-          message: 'Unauthorized to upload documents for other employees'
-        });
-        return;
+      if (employeeId !== currentUser.employeeId && !currentUser.roles.includes('HR_ADMIN')) {
+        throw new AppError('Unauthorized to upload documents for other employees', 'AUTHORIZATION_ERROR', 403);
       }
 
       const uploadRequest: DocumentUploadRequest = {
@@ -137,20 +128,8 @@ export class StaffDocumentController {
         userId: req.user?.id,
         body: req.body
       });
-
-      if (error instanceof ValidationError) {
-        res.status(400).json({
-          success: false,
-          message: error.message,
-          errors: error.details
-        });
-        return;
-      }
-
-      res.status(500).json({
-        success: false,
-        message: 'Internal server error during document upload'
-      });
+      // Delegate to global error handler
+      throw error;
     }
   };
 
@@ -309,8 +288,8 @@ export class StaffDocumentController {
       if (employeeId) {
         // Permission check - users can only view their own documents unless they're HR/manager
         if (employeeId !== currentUser.employeeId &&
-            !currentUser.roles.includes('hr_admin') &&
-            !currentUser.roles.includes('manager')) {
+            !currentUser.roles.includes('HR_ADMIN') &&
+            !currentUser.roles.includes('MANAGER')) {
           res.status(403).json({
             success: false,
             message: 'Unauthorized to view documents for other employees'
@@ -318,7 +297,7 @@ export class StaffDocumentController {
           return;
         }
         criteria.employeeId = employeeId as string;
-      } else if (!currentUser.roles.includes('hr_admin')) {
+      } else if (!currentUser.roles.includes('HR_ADMIN')) {
         // Non-HR users can only see their own documents
         criteria.employeeId = currentUser.employeeId;
       }
@@ -401,7 +380,7 @@ export class StaffDocumentController {
 
       // Permission check - users can only update their own pending documents
       const currentUser = req.user!;
-      if (document.employeeId !== currentUser.employeeId && !currentUser.roles.includes('hr_admin')) {
+      if (document.employeeId !== currentUser.employeeId && !currentUser.roles.includes('HR_ADMIN')) {
         res.status(403).json({
           success: false,
           message: 'Unauthorized to update this document'
@@ -410,7 +389,7 @@ export class StaffDocumentController {
       }
 
       // Only pending documents can be updated by employees
-      if (document.status !== 'PENDING' && !currentUser.roles.includes('hr_admin')) {
+      if (document.status !== 'PENDING' && !currentUser.roles.includes('HR_ADMIN')) {
         res.status(400).json({
           success: false,
           message: 'Only pending documents can be updated'
@@ -484,7 +463,7 @@ export class StaffDocumentController {
       const currentUser = req.user!;
 
       // Only HR admins can approve/reject documents
-      if (!currentUser.roles.includes('hr_admin')) {
+      if (!currentUser.roles.includes('HR_ADMIN')) {
         res.status(403).json({
           success: false,
           message: 'Unauthorized to approve documents'
@@ -565,7 +544,7 @@ export class StaffDocumentController {
       const currentUser = req.user!;
 
       // Permission check
-      const canDelete = currentUser.roles.includes('hr_admin') ||
+      const canDelete = currentUser.roles.includes('HR_ADMIN') ||
         (document.employeeId === currentUser.employeeId && document.status === 'PENDING');
 
       if (!canDelete) {
@@ -622,7 +601,7 @@ export class StaffDocumentController {
       const currentUser = req.user!;
 
       // Permission check
-      if (employeeId !== currentUser.employeeId && !currentUser.roles.includes('hr_admin')) {
+      if (employeeId !== currentUser.employeeId && !currentUser.roles.includes('HR_ADMIN')) {
         res.status(403).json({
           success: false,
           message: 'Unauthorized to view statistics for other employees'
@@ -660,7 +639,7 @@ export class StaffDocumentController {
       const { days = 30 } = req.query;
 
       // Only HR admins can view all expiring documents
-      if (!req.user?.roles.includes('hr_admin')) {
+      if (!req.user?.roles.includes('HR_ADMIN')) {
         res.status(403).json({
           success: false,
           message: 'Unauthorized to view expiring documents'

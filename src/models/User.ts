@@ -9,4 +9,13 @@ export interface User {
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
+  permissionContext?: {
+    userId: string;
+    roles: UserRole[];
+    employeeId?: string;
+    targetEmployeeId?: string;
+    targetUserId?: string;
+    isManager?: boolean;
+    managedEmployeeIds?: string[];
+  };
 }

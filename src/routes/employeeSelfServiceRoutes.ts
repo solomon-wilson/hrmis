@@ -1,14 +1,16 @@
 import { Router } from 'express';
 import { EmployeeSelfServiceController } from '../controllers/EmployeeSelfServiceController';
-import { 
-  authenticate, 
+import { EmployeeController } from '../controllers/EmployeeController';
+import {
+  authenticate,
   requireRole,
-  filterEmployeeFields 
+  filterEmployeeFields
 } from '../middleware/auth';
 import { validateRequest } from '../middleware/validation';
 
 const router = Router();
 const employeeSelfServiceController = new EmployeeSelfServiceController();
+const employeeController = new EmployeeController();
 
 // Apply authentication to all self-service routes
 router.use(authenticate);
@@ -63,9 +65,33 @@ router.get('/me/change-requests',
  * Get specific change request details
  * Requires: EMPLOYEE role or higher
  */
-router.get('/me/change-requests/:requestId', 
+router.get('/me/change-requests/:requestId',
   requireRole('EMPLOYEE'),
   employeeSelfServiceController.getChangeRequest
+);
+
+// ==============================================
+// SELF-SERVICE DOCUMENT ROUTES
+// ==============================================
+
+/**
+ * GET /api/employees/me/documents
+ * Get employee's own document summary
+ * Requires: EMPLOYEE role or higher
+ */
+router.get('/me/documents',
+  requireRole('EMPLOYEE'),
+  employeeController.getMyDocuments
+);
+
+/**
+ * GET /api/employees/me/documents/requirements
+ * Get employee's own document requirements and recommendations
+ * Requires: EMPLOYEE role or higher
+ */
+router.get('/me/documents/requirements',
+  requireRole('EMPLOYEE'),
+  employeeController.getMyDocumentRequirements
 );
 
 export { router as employeeSelfServiceRoutes };

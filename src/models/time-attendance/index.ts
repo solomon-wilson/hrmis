@@ -1,5 +1,5 @@
 // Time Entry Models
-export {
+export type {
   TimeEntry,
   BreakEntry,
   TimeEntryData,
@@ -8,7 +8,7 @@ export {
 } from './TimeEntry';
 
 // Leave Request Models
-export {
+export type {
   LeaveRequest,
   LeaveType,
   LeaveRequestData,
@@ -16,7 +16,7 @@ export {
 } from './LeaveRequest';
 
 // Leave Balance Models
-export {
+export type {
   LeaveBalance,
   AccrualTransaction,
   LeaveBalanceData,
@@ -24,7 +24,7 @@ export {
 } from './LeaveBalance';
 
 // Policy Models
-export {
+export type {
   LeavePolicy,
   OvertimePolicy,
   EligibilityRule,
@@ -39,18 +39,18 @@ export {
 } from './Policy';
 
 // Policy Application Engine
-export {
+export type {
   PolicyApplicationEngine
 } from './PolicyApplicationEngine';
 
 // Employee Time Status Model
-export {
+export type {
   EmployeeTimeStatus,
   EmployeeTimeStatusData
 } from './EmployeeTimeStatus';
 
 // Time Calculation Engine
-export {
+export type {
   TimeCalculationEngine,
   OvertimeRules,
   PayPeriod,

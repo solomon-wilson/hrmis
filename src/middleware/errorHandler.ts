@@ -7,7 +7,10 @@ import {
   getCorrelationId,
   createErrorContext,
   mapDatabaseError,
-  mapJWTError
+  mapJWTError,
+  mapMulterError,
+  FileUploadError,
+  StorageQuotaExceededError
 } from '../utils/errors';
 
 // Enhanced error handler with comprehensive error mapping and correlation tracking
@@ -77,6 +80,23 @@ export const errorHandler = (
       }
     };
     res.status(400).json(response);
+    return;
+  }
+
+  // Handle Multer/file upload errors
+  const mappedMulter = mapMulterError(error);
+  if (mappedMulter) {
+    const response: ErrorResponse = {
+      error: {
+        code: mappedMulter.code,
+        message: mappedMulter.message,
+        details: mappedMulter.details,
+        timestamp: new Date().toISOString(),
+        requestId,
+        path: req.originalUrl
+      }
+    };
+    res.status(mappedMulter.statusCode).json(response);
     return;
   }
 

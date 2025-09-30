@@ -43,7 +43,7 @@ export class AnnualLeavePlanController {
 
       // Permission check - users can only create plans for themselves unless they're HR/admin
       const currentUser = req.user!;
-      if (employeeId !== currentUser.employeeId && !currentUser.roles.includes('hr_admin')) {
+      if (employeeId !== currentUser.employeeId && !currentUser.roles.includes('HR_ADMIN')) {
         res.status(403).json({
           success: false,
           message: 'Unauthorized to create leave plans for other employees'
@@ -95,10 +95,7 @@ export class AnnualLeavePlanController {
           if (conflictCheck.hasConflicts) {
             res.status(400).json({
               success: false,
-              message: 'Leave plan contains conflicts with existing plans',
-              errors: conflictCheck.conflicts.map(conflict =>
-                `Conflict: ${conflict.plannedLeave.leaveType} from ${conflict.plannedLeave.startDate} to ${conflict.plannedLeave.endDate} overlaps with existing leave`
-              )
+errors: conflictCheck.conflicts.map(conflict => `Conflict: ${conflict.plannedLeave.type} from ${conflict.plannedLeave.startDate} to ${conflict.plannedLeave.endDate} overlaps with existing leave`)
             });
             return;
           }
@@ -112,16 +109,15 @@ export class AnnualLeavePlanController {
         }
       }
 
-      const planData = {
+      const newPlan = AnnualLeavePlan.createNew({
         employeeId,
         year,
         totalEntitlement: parseFloat(totalEntitlement),
         carriedOver: carriedOver ? parseFloat(carriedOver) : 0,
         plannedLeaves: validatedPlannedLeaves,
-        status: 'DRAFT' as AnnualLeaveStatus
-      };
+      });
 
-      const leavePlan = await this.leavePlanRepository.create(planData);
+      const leavePlan = await this.leavePlanRepository.create(newPlan);
 
       logger.info('Leave plan created successfully', {
         planId: leavePlan.id,
@@ -187,8 +183,8 @@ export class AnnualLeavePlanController {
 
       // Permission check
       const currentUser = req.user!;
-      const canAccess = currentUser.roles.includes('hr_admin') ||
-        currentUser.roles.includes('manager') ||
+      const canAccess = currentUser.roles.includes('HR_ADMIN') ||
+        currentUser.roles.includes('MANAGER') ||
         leavePlan.employeeId === currentUser.employeeId;
 
       if (!canAccess) {
@@ -258,8 +254,8 @@ export class AnnualLeavePlanController {
       if (employeeId) {
         // Permission check - users can only view their own plans unless they're HR/manager
         if (employeeId !== currentUser.employeeId &&
-            !currentUser.roles.includes('hr_admin') &&
-            !currentUser.roles.includes('manager')) {
+            !currentUser.roles.includes('HR_ADMIN') &&
+            !currentUser.roles.includes('MANAGER')) {
           res.status(403).json({
             success: false,
             message: 'Unauthorized to view leave plans for other employees'
@@ -267,7 +263,7 @@ export class AnnualLeavePlanController {
           return;
         }
         criteria.employeeId = employeeId as string;
-      } else if (!currentUser.roles.includes('hr_admin')) {
+      } else if (!currentUser.roles.includes('HR_ADMIN')) {
         // Non-HR users can only see their own plans
         criteria.employeeId = currentUser.employeeId;
       }
@@ -349,7 +345,7 @@ export class AnnualLeavePlanController {
       const currentUser = req.user!;
 
       // Permission check - users can only update their own draft plans
-      if (leavePlan.employeeId !== currentUser.employeeId && !currentUser.roles.includes('hr_admin')) {
+      if (leavePlan.employeeId !== currentUser.employeeId && !currentUser.roles.includes('HR_ADMIN')) {
         res.status(403).json({
           success: false,
           message: 'Unauthorized to update this leave plan'
@@ -358,7 +354,7 @@ export class AnnualLeavePlanController {
       }
 
       // Only draft plans can be updated by employees
-      if (leavePlan.status !== 'DRAFT' && !currentUser.roles.includes('hr_admin')) {
+      if (leavePlan.status !== 'DRAFT' && !currentUser.roles.includes('HR_ADMIN')) {
         res.status(400).json({
           success: false,
           message: 'Only draft leave plans can be updated'
@@ -415,7 +411,7 @@ export class AnnualLeavePlanController {
               success: false,
               message: 'Updated leave plan contains conflicts',
               errors: conflictCheck.conflicts.map(conflict =>
-                `Conflict: ${conflict.plannedLeave.leaveType} from ${conflict.plannedLeave.startDate} to ${conflict.plannedLeave.endDate} overlaps with existing leave`
+                `Conflict: ${conflict.plannedLeave.type} from ${conflict.plannedLeave.startDate} to ${conflict.plannedLeave.endDate} overlaps with existing leave`
               )
             });
             return;
@@ -494,7 +490,7 @@ export class AnnualLeavePlanController {
       const currentUser = req.user!;
 
       // Permission check
-      if (leavePlan.employeeId !== currentUser.employeeId && !currentUser.roles.includes('hr_admin')) {
+      if (leavePlan.employeeId !== currentUser.employeeId && !currentUser.roles.includes('HR_ADMIN')) {
         res.status(403).json({
           success: false,
           message: 'Unauthorized to submit this leave plan'
@@ -576,7 +572,7 @@ export class AnnualLeavePlanController {
       const currentUser = req.user!;
 
       // Check if user is manager or HR admin
-      if (!currentUser.roles.includes('manager') && !currentUser.roles.includes('hr_admin')) {
+      if (!currentUser.roles.includes('MANAGER') && !currentUser.roles.includes('HR_ADMIN')) {
         res.status(403).json({
           success: false,
           message: 'Unauthorized to approve leave plans'
@@ -660,7 +656,7 @@ export class AnnualLeavePlanController {
       const currentUser = req.user!;
 
       // Only HR admins can give final approval
-      if (!currentUser.roles.includes('hr_admin')) {
+      if (!currentUser.roles.includes('HR_ADMIN')) {
         res.status(403).json({
           success: false,
           message: 'Unauthorized to provide HR approval'
@@ -742,7 +738,7 @@ export class AnnualLeavePlanController {
       const currentUser = req.user!;
 
       // Permission check - only draft plans can be deleted by employees
-      const canDelete = currentUser.roles.includes('hr_admin') ||
+      const canDelete = currentUser.roles.includes('HR_ADMIN') ||
         (leavePlan.employeeId === currentUser.employeeId && leavePlan.status === 'DRAFT');
 
       if (!canDelete) {
@@ -787,7 +783,7 @@ export class AnnualLeavePlanController {
     try {
       const currentUser = req.user!;
 
-      if (!currentUser.roles.includes('manager') && !currentUser.roles.includes('hr_admin')) {
+      if (!currentUser.roles.includes('MANAGER') && !currentUser.roles.includes('HR_ADMIN')) {
         res.status(403).json({
           success: false,
           message: 'Unauthorized to view pending approvals'
@@ -795,7 +791,7 @@ export class AnnualLeavePlanController {
         return;
       }
 
-      const pendingPlans = await this.leavePlanRepository.getPendingManagerApprovals(currentUser.employeeId);
+      const pendingPlans = await this.leavePlanRepository.getPendingManagerApprovals(currentUser.employeeId!);
 
       res.json({
         success: true,
@@ -833,7 +829,7 @@ export class AnnualLeavePlanController {
     try {
       const currentUser = req.user!;
 
-      if (!currentUser.roles.includes('hr_admin')) {
+      if (!currentUser.roles.includes('HR_ADMIN')) {
         res.status(403).json({
           success: false,
           message: 'Unauthorized to view pending HR approvals'
@@ -882,7 +878,7 @@ export class AnnualLeavePlanController {
       const { year } = req.query;
 
       // Only HR admins can view statistics
-      if (!req.user?.roles.includes('hr_admin')) {
+      if (!req.user?.roles.includes('HR_ADMIN')) {
         res.status(403).json({
           success: false,
           message: 'Unauthorized to view leave plan statistics'

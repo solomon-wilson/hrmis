@@ -1,6 +1,7 @@
 import { PoolClient } from 'pg';
 import { StaffDocument, StaffDocumentData, DocumentCategory, DocumentStatus } from '../../models/document-management';
 import { FileStorageService, FileUploadRequest } from './FileStorageService';
+import { StorageQuotaExceededError } from '../../utils/errors';
 import { ValidationError } from '../../utils/validation';
 import { logger } from '../../utils/logger';
 import { database } from '../../database/connection';
@@ -45,7 +46,10 @@ export class DocumentService {
     return database.transaction(async (client: PoolClient) => {
       try {
         // Validate file and storage quota first
-        await FileStorageService.checkStorageQuota(request.employeeId, request.file.length);
+        const quota = await FileStorageService.checkStorageQuota(request.employeeId, request.file.length);
+        if (!quota.withinQuota) {
+          throw new StorageQuotaExceededError(quota.quota, quota.currentUsage, request.file.length);
+        }
 
         // Upload file to storage
         const uploadResult = await FileStorageService.uploadFile({

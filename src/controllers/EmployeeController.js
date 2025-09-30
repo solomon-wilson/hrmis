@@ -1,0 +1,673 @@
+import { EmployeeService } from '../services/EmployeeService';
+import { ValidationError } from '../utils/validation';
+import { logger } from '../utils/logger';
+import Joi from 'joi';
+import { requiredStringSchema, optionalStringSchema, emailSchema, phoneSchema, dateSchema, optionalDateSchema, addressSchema, emergencyContactSchema, employmentTypeSchema, uuidSchema } from '../utils/validation';
+export class EmployeeController {
+    constructor() {
+        /**
+         * GET /api/employees
+         * Search and list employees with pagination and filtering
+         */
+        this.searchEmployees = async (req, res) => {
+            try {
+                // Validate query parameters
+                const querySchema = Joi.object({
+                    search: optionalStringSchema,
+                    department: optionalStringSchema,
+                    managerId: uuidSchema.optional(),
+                    status: Joi.string().valid('ACTIVE', 'INACTIVE', 'TERMINATED', 'ON_LEAVE').optional(),
+                    employmentType: Joi.string().valid('FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN').optional(),
+                    startDateFrom: Joi.date().optional(),
+                    startDateTo: Joi.date().optional(),
+                    page: Joi.number().integer().min(1).default(1),
+                    limit: Joi.number().integer().min(1).max(100).default(20),
+                    sortBy: Joi.string().valid('firstName', 'lastName', 'employeeId', 'department', 'startDate').default('lastName'),
+                    sortOrder: Joi.string().valid('asc', 'desc').default('asc')
+                });
+                const { error, value: query } = querySchema.validate(req.query);
+                if (error) {
+                    res.status(400).json({
+                        error: {
+                            code: 'INVALID_QUERY_PARAMETERS',
+                            message: 'Invalid query parameters',
+                            details: error.details
+                        }
+                    });
+                    return;
+                }
+                // Build search criteria
+                const searchCriteria = {
+                    search: query.search,
+                    department: query.department,
+                    managerId: query.managerId,
+                    status: query.status,
+                    employmentType: query.employmentType,
+                    startDateFrom: query.startDateFrom,
+                    startDateTo: query.startDateTo
+                };
+                // Pagination options
+                const pagination = {
+                    page: query.page,
+                    limit: query.limit,
+                    sortBy: query.sortBy,
+                    sortOrder: query.sortOrder
+                };
+                // Search employees
+                const result = await this.employeeService.searchEmployees(searchCriteria, pagination, this.convertPermissionContext(req.permissionContext));
+                logger.info(`Employee search completed`, {
+                    userId: req.user?.id,
+                    criteria: searchCriteria,
+                    resultCount: result.data.length,
+                    totalCount: result.pagination.total
+                });
+                res.json({
+                    data: result.data,
+                    pagination: result.pagination
+                });
+            }
+            catch (error) {
+                this.handleError(error, res, 'Failed to search employees');
+            }
+        };
+        /**
+         * POST /api/employees
+         * Create a new employee
+         */
+        this.createEmployee = async (req, res) => {
+            try {
+                // Validate request body
+                const createSchema = Joi.object({
+                    employeeId: requiredStringSchema.max(20).pattern(/^[A-Z0-9-]+$/),
+                    personalInfo: Joi.object({
+                        firstName: requiredStringSchema.max(50),
+                        lastName: requiredStringSchema.max(50),
+                        email: emailSchema,
+                        phone: phoneSchema.optional(),
+                        dateOfBirth: optionalDateSchema,
+                        socialSecurityNumber: Joi.string().optional().pattern(/^\d{3}-\d{2}-\d{4}$/),
+                        address: addressSchema.optional(),
+                        emergencyContact: emergencyContactSchema.optional()
+                    }).required(),
+                    jobInfo: Joi.object({
+                        jobTitle: requiredStringSchema.max(100),
+                        department: requiredStringSchema.max(100),
+                        managerId: uuidSchema.optional(),
+                        startDate: dateSchema,
+                        employmentType: employmentTypeSchema,
+                        salary: Joi.number().positive().optional(),
+                        location: requiredStringSchema.max(100)
+                    }).required()
+                });
+                const { error, value: requestData } = createSchema.validate(req.body);
+                if (error) {
+                    res.status(400).json({
+                        error: {
+                            code: 'INVALID_REQUEST_DATA',
+                            message: 'Invalid employee data',
+                            details: error.details
+                        }
+                    });
+                    return;
+                }
+                // Create employee request
+                const createRequest = {
+                    ...requestData,
+                    createdBy: req.user.id
+                };
+                // Create employee
+                const employee = await this.employeeService.createEmployee(createRequest, this.convertPermissionContext(req.permissionContext));
+                logger.info(`Employee created successfully`, {
+                    employeeId: employee.id,
+                    employeeNumber: employee.employeeId,
+                    createdBy: req.user?.id
+                });
+                res.status(201).json(employee.toJSON());
+            }
+            catch (error) {
+                this.handleError(error, res, 'Failed to create employee');
+            }
+        };
+        /**
+         * GET /api/employees/:id
+         * Get employee by ID
+         */
+        this.getEmployee = async (req, res) => {
+            try {
+                // Validate employee ID parameter
+                const paramSchema = Joi.object({
+                    id: uuidSchema
+                });
+                const { error, value: params } = paramSchema.validate(req.params);
+                if (error) {
+                    res.status(400).json({
+                        error: {
+                            code: 'INVALID_EMPLOYEE_ID',
+                            message: 'Invalid employee ID format',
+                            details: error.details
+                        }
+                    });
+                    return;
+                }
+                // Get employee
+                const employee = await this.employeeService.getEmployee(params.id, this.convertPermissionContext(req.permissionContext));
+                if (!employee) {
+                    res.status(404).json({
+                        error: {
+                            code: 'EMPLOYEE_NOT_FOUND',
+                            message: 'Employee not found'
+                        }
+                    });
+                    return;
+                }
+                logger.debug(`Employee retrieved`, {
+                    employeeId: employee.id,
+                    requestedBy: req.user?.id
+                });
+                res.json(employee.toJSON());
+            }
+            catch (error) {
+                this.handleError(error, res, 'Failed to get employee');
+            }
+        };
+        /**
+         * PUT /api/employees/:id
+         * Update employee
+         */
+        this.updateEmployee = async (req, res) => {
+            try {
+                // Validate employee ID parameter
+                const paramSchema = Joi.object({
+                    id: uuidSchema
+                });
+                const { error: paramError, value: params } = paramSchema.validate(req.params);
+                if (paramError) {
+                    res.status(400).json({
+                        error: {
+                            code: 'INVALID_EMPLOYEE_ID',
+                            message: 'Invalid employee ID format',
+                            details: paramError.details
+                        }
+                    });
+                    return;
+                }
+                // Validate request body
+                const updateSchema = Joi.object({
+                    personalInfo: Joi.object({
+                        firstName: requiredStringSchema.max(50).optional(),
+                        lastName: requiredStringSchema.max(50).optional(),
+                        email: emailSchema.optional(),
+                        phone: phoneSchema.optional(),
+                        dateOfBirth: optionalDateSchema,
+                        socialSecurityNumber: Joi.string().optional().pattern(/^\d{3}-\d{2}-\d{4}$/),
+                        address: addressSchema.optional(),
+                        emergencyContact: emergencyContactSchema.optional()
+                    }).optional(),
+                    jobInfo: Joi.object({
+                        jobTitle: requiredStringSchema.max(100).optional(),
+                        department: requiredStringSchema.max(100).optional(),
+                        managerId: uuidSchema.optional().allow(null),
+                        startDate: dateSchema.optional(),
+                        employmentType: employmentTypeSchema.optional(),
+                        salary: Joi.number().positive().optional(),
+                        location: requiredStringSchema.max(100).optional()
+                    }).optional()
+                }).min(1); // At least one field must be provided
+                const { error: bodyError, value: requestData } = updateSchema.validate(req.body);
+                if (bodyError) {
+                    res.status(400).json({
+                        error: {
+                            code: 'INVALID_REQUEST_DATA',
+                            message: 'Invalid update data',
+                            details: bodyError.details
+                        }
+                    });
+                    return;
+                }
+                // Create update request
+                const updateRequest = {
+                    ...requestData,
+                    updatedBy: req.user.id
+                };
+                // Update employee
+                const employee = await this.employeeService.updateEmployee(params.id, updateRequest, this.convertPermissionContext(req.permissionContext));
+                logger.info(`Employee updated successfully`, {
+                    employeeId: employee.id,
+                    updatedBy: req.user?.id,
+                    updatedFields: Object.keys(requestData)
+                });
+                res.json(employee.toJSON());
+            }
+            catch (error) {
+                this.handleError(error, res, 'Failed to update employee');
+            }
+        };
+        /**
+         * DELETE /api/employees/:id
+         * Soft delete employee (set status to TERMINATED)
+         */
+        this.deleteEmployee = async (req, res) => {
+            try {
+                // Validate employee ID parameter
+                const paramSchema = Joi.object({
+                    id: uuidSchema
+                });
+                const { error, value: params } = paramSchema.validate(req.params);
+                if (error) {
+                    res.status(400).json({
+                        error: {
+                            code: 'INVALID_EMPLOYEE_ID',
+                            message: 'Invalid employee ID format',
+                            details: error.details
+                        }
+                    });
+                    return;
+                }
+                // Validate request body for termination details
+                const deleteSchema = Joi.object({
+                    reason: Joi.string().valid('RESIGNATION', 'TERMINATION_FOR_CAUSE', 'LAYOFF', 'END_OF_CONTRACT', 'RETIREMENT').required(),
+                    effectiveDate: dateSchema.default(() => new Date()),
+                    notes: optionalStringSchema
+                });
+                const { error: bodyError, value: deleteData } = deleteSchema.validate(req.body);
+                if (bodyError) {
+                    res.status(400).json({
+                        error: {
+                            code: 'INVALID_TERMINATION_DATA',
+                            message: 'Invalid termination data',
+                            details: bodyError.details
+                        }
+                    });
+                    return;
+                }
+                // Terminate employee (soft delete)
+                const employee = await this.employeeService.updateEmployeeStatus(params.id, 'TERMINATED', deleteData.effectiveDate, deleteData.reason, deleteData.notes, this.convertPermissionContext(req.permissionContext));
+                logger.info(`Employee terminated (soft deleted)`, {
+                    employeeId: employee.id,
+                    reason: deleteData.reason,
+                    terminatedBy: req.user?.id
+                });
+                res.json({
+                    message: 'Employee terminated successfully',
+                    employee: employee.toJSON()
+                });
+            }
+            catch (error) {
+                this.handleError(error, res, 'Failed to terminate employee');
+            }
+        };
+        /**
+         * GET /api/employees/:id/history
+         * Get employee status history
+         */
+        this.getEmployeeHistory = async (req, res) => {
+            try {
+                // Validate employee ID parameter
+                const paramSchema = Joi.object({
+                    id: uuidSchema
+                });
+                const { error, value: params } = paramSchema.validate(req.params);
+                if (error) {
+                    res.status(400).json({
+                        error: {
+                            code: 'INVALID_EMPLOYEE_ID',
+                            message: 'Invalid employee ID format',
+                            details: error.details
+                        }
+                    });
+                    return;
+                }
+                // Get employee status history
+                const history = await this.employeeService.getEmployeeStatusHistory(params.id, this.convertPermissionContext(req.permissionContext));
+                logger.debug(`Employee history retrieved`, {
+                    employeeId: params.id,
+                    historyCount: history.length,
+                    requestedBy: req.user?.id
+                });
+                res.json({
+                    employeeId: params.id,
+                    history
+                });
+            }
+            catch (error) {
+                this.handleError(error, res, 'Failed to get employee history');
+            }
+        };
+        // ==============================================
+        // DOCUMENT INTEGRATION ENDPOINTS
+        // ==============================================
+        /**
+         * Get employee document summary
+         * GET /api/employees/:id/documents/summary
+         */
+        this.getEmployeeDocumentSummary = async (req, res) => {
+            try {
+                const { id } = req.params;
+                if (!req.user?.permissionContext) {
+                    res.status(401).json({
+                        error: {
+                            code: 'UNAUTHORIZED',
+                            message: 'Authentication required'
+                        }
+                    });
+                    return;
+                }
+                const permissionContext = this.convertPermissionContext(req.user.permissionContext);
+                const summary = await this.employeeService.getEmployeeDocumentSummary(id, permissionContext);
+                logger.info('Employee document summary retrieved', {
+                    employeeId: id,
+                    requestedBy: permissionContext.userId
+                });
+                res.json({
+                    success: true,
+                    data: summary
+                });
+            }
+            catch (error) {
+                this.handleError(error, res, 'Failed to get employee document summary');
+            }
+        };
+        /**
+         * Get employee passport photo
+         * GET /api/employees/:id/passport-photo
+         */
+        this.getEmployeePassportPhoto = async (req, res) => {
+            try {
+                const { id } = req.params;
+                if (!req.user?.permissionContext) {
+                    res.status(401).json({
+                        error: {
+                            code: 'UNAUTHORIZED',
+                            message: 'Authentication required'
+                        }
+                    });
+                    return;
+                }
+                const permissionContext = this.convertPermissionContext(req.user.permissionContext);
+                const photoUrl = await this.employeeService.getEmployeePassportPhoto(id, permissionContext);
+                if (!photoUrl) {
+                    res.status(404).json({
+                        error: {
+                            code: 'NOT_FOUND',
+                            message: 'No passport photo found for this employee'
+                        }
+                    });
+                    return;
+                }
+                logger.info('Employee passport photo retrieved', {
+                    employeeId: id,
+                    requestedBy: permissionContext.userId
+                });
+                res.json({
+                    success: true,
+                    data: {
+                        photoUrl,
+                        expiresIn: 3600 // URL expires in 1 hour
+                    }
+                });
+            }
+            catch (error) {
+                this.handleError(error, res, 'Failed to get employee passport photo');
+            }
+        };
+        /**
+         * Check employee document requirements status
+         * GET /api/employees/:id/documents/requirements
+         */
+        this.getEmployeeDocumentRequirements = async (req, res) => {
+            try {
+                const { id } = req.params;
+                if (!req.user?.permissionContext) {
+                    res.status(401).json({
+                        error: {
+                            code: 'UNAUTHORIZED',
+                            message: 'Authentication required'
+                        }
+                    });
+                    return;
+                }
+                const permissionContext = this.convertPermissionContext(req.user.permissionContext);
+                const requirements = await this.employeeService.checkEmployeeDocumentRequirements(id, permissionContext);
+                logger.info('Employee document requirements checked', {
+                    employeeId: id,
+                    requestedBy: permissionContext.userId,
+                    isCompliant: requirements.isCompliant,
+                    complianceScore: requirements.complianceScore
+                });
+                res.json({
+                    success: true,
+                    data: requirements
+                });
+            }
+            catch (error) {
+                this.handleError(error, res, 'Failed to check employee document requirements');
+            }
+        };
+        /**
+         * Get employee document statistics for reporting
+         * GET /api/employees/:id/documents/statistics
+         */
+        this.getEmployeeDocumentStatistics = async (req, res) => {
+            try {
+                const { id } = req.params;
+                if (!req.user?.permissionContext) {
+                    res.status(401).json({
+                        error: {
+                            code: 'UNAUTHORIZED',
+                            message: 'Authentication required'
+                        }
+                    });
+                    return;
+                }
+                const permissionContext = this.convertPermissionContext(req.user.permissionContext);
+                const statistics = await this.employeeService.getEmployeeDocumentStatistics(id, permissionContext);
+                logger.info('Employee document statistics retrieved', {
+                    employeeId: id,
+                    requestedBy: permissionContext.userId,
+                    totalDocuments: statistics.summary.totalDocuments
+                });
+                res.json({
+                    success: true,
+                    data: statistics
+                });
+            }
+            catch (error) {
+                this.handleError(error, res, 'Failed to get employee document statistics');
+            }
+        };
+        /**
+         * Get employee self-service document viewing (for logged-in employee)
+         * GET /api/employees/me/documents
+         */
+        this.getMyDocuments = async (req, res) => {
+            try {
+                if (!req.user?.permissionContext) {
+                    res.status(401).json({
+                        error: {
+                            code: 'UNAUTHORIZED',
+                            message: 'Authentication required'
+                        }
+                    });
+                    return;
+                }
+                const permissionContext = this.convertPermissionContext(req.user.permissionContext);
+                // Get documents for the authenticated user's employee ID
+                const employeeId = req.user.employeeId || permissionContext.userId;
+                const summary = await this.employeeService.getEmployeeDocumentSummary(employeeId, permissionContext);
+                logger.info('Employee self-service documents retrieved', {
+                    employeeId,
+                    totalDocuments: summary.totalDocuments
+                });
+                res.json({
+                    success: true,
+                    data: {
+                        employeeId,
+                        summary,
+                        selfService: true
+                    }
+                });
+            }
+            catch (error) {
+                this.handleError(error, res, 'Failed to get self-service documents');
+            }
+        };
+        /**
+         * Get employee self-service document requirements
+         * GET /api/employees/me/documents/requirements
+         */
+        this.getMyDocumentRequirements = async (req, res) => {
+            try {
+                if (!req.user?.permissionContext) {
+                    res.status(401).json({
+                        error: {
+                            code: 'UNAUTHORIZED',
+                            message: 'Authentication required'
+                        }
+                    });
+                    return;
+                }
+                const permissionContext = this.convertPermissionContext(req.user.permissionContext);
+                // Get requirements for the authenticated user's employee ID
+                const employeeId = req.user.employeeId || permissionContext.userId;
+                const requirements = await this.employeeService.checkEmployeeDocumentRequirements(employeeId, permissionContext);
+                logger.info('Employee self-service document requirements retrieved', {
+                    employeeId,
+                    isCompliant: requirements.isCompliant,
+                    complianceScore: requirements.complianceScore
+                });
+                res.json({
+                    success: true,
+                    data: {
+                        employeeId,
+                        ...requirements,
+                        selfService: true,
+                        recommendations: this.generateDocumentRecommendations(requirements)
+                    }
+                });
+            }
+            catch (error) {
+                this.handleError(error, res, 'Failed to get self-service document requirements');
+            }
+        };
+        this.employeeService = new EmployeeService();
+    }
+    /**
+     * Convert new PermissionContext to legacy format for EmployeeService
+     */
+    convertPermissionContext(authContext) {
+        // Determine primary role - prioritize HR_ADMIN, then MANAGER, then EMPLOYEE, then VIEWER
+        let primaryRole = 'VIEWER';
+        if (authContext.roles.includes('HR_ADMIN')) {
+            primaryRole = 'HR_ADMIN';
+        }
+        else if (authContext.roles.includes('MANAGER')) {
+            primaryRole = 'MANAGER';
+        }
+        else if (authContext.roles.includes('EMPLOYEE')) {
+            primaryRole = 'EMPLOYEE';
+        }
+        return {
+            userId: authContext.userId,
+            role: primaryRole,
+            managedEmployeeIds: authContext.managedEmployeeIds
+        };
+    }
+    /**
+     * Generate document upload recommendations for employees
+     */
+    generateDocumentRecommendations(requirements) {
+        const recommendations = [];
+        requirements.requiredDocuments.forEach((doc) => {
+            if (doc.required && !doc.present) {
+                recommendations.push({
+                    category: doc.category,
+                    priority: 'high',
+                    action: 'Upload required document',
+                    description: `Please upload your ${doc.category.toLowerCase().replace('_', ' ')} document`
+                });
+            }
+            else if (doc.present && doc.isExpiringSoon) {
+                recommendations.push({
+                    category: doc.category,
+                    priority: 'medium',
+                    action: 'Update expiring document',
+                    description: `Your ${doc.category.toLowerCase().replace('_', ' ')} document expires soon. Please upload an updated version.`
+                });
+            }
+            else if (doc.present && doc.isExpired) {
+                recommendations.push({
+                    category: doc.category,
+                    priority: 'high',
+                    action: 'Replace expired document',
+                    description: `Your ${doc.category.toLowerCase().replace('_', ' ')} document has expired. Please upload a new version immediately.`
+                });
+            }
+        });
+        // Sort by priority
+        return recommendations.sort((a, b) => {
+            const priorityOrder = { 'high': 0, 'medium': 1, 'low': 2 };
+            return priorityOrder[a.priority] - priorityOrder[b.priority];
+        });
+    }
+    /**
+     * Error handling helper
+     */
+    handleError(error, res, defaultMessage) {
+        logger.error(defaultMessage, error);
+        if (error instanceof ValidationError) {
+            res.status(400).json({
+                error: {
+                    code: 'VALIDATION_ERROR',
+                    message: error.message,
+                    details: error.details
+                }
+            });
+            return;
+        }
+        // Handle specific error types
+        if (error.message?.includes('not found')) {
+            res.status(404).json({
+                error: {
+                    code: 'NOT_FOUND',
+                    message: error.message
+                }
+            });
+            return;
+        }
+        if (error.message?.includes('permission') || error.message?.includes('access')) {
+            res.status(403).json({
+                error: {
+                    code: 'ACCESS_DENIED',
+                    message: error.message
+                }
+            });
+            return;
+        }
+        if (error.message?.includes('duplicate') || error.message?.includes('already exists')) {
+            res.status(409).json({
+                error: {
+                    code: 'CONFLICT',
+                    message: error.message
+                }
+            });
+            return;
+        }
+        // Database connection errors
+        if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+            res.status(503).json({
+                error: {
+                    code: 'SERVICE_UNAVAILABLE',
+                    message: 'Database service is currently unavailable'
+                }
+            });
+            return;
+        }
+        // Generic server error
+        res.status(500).json({
+            error: {
+                code: 'INTERNAL_SERVER_ERROR',
+                message: 'An unexpected error occurred'
+            }
+        });
+    }
+}

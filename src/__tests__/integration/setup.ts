@@ -134,10 +134,12 @@ export const cleanupTestEnvironment = async (): Promise<void> => {
   await IntegrationTestSetup.teardownTestEnvironment();
 };
 
-// Global setup and teardown for Jest
-export default async (): Promise<void> => {
+// Global setup function for Jest
+const setupIntegrationTests = async (): Promise<void> => {
   await IntegrationTestSetup.setupTestEnvironment();
 };
+
+export default setupIntegrationTests;
 
 // Export for Jest global teardown
 export { cleanupTestEnvironment as teardown };

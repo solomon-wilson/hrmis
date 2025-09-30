@@ -4,6 +4,8 @@ import { ValidationError } from '../../utils/validation';
 import { logger } from '../../utils/logger';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { sanitizeFileName, assertAllowedMimeType, validateFileExtensionMatchesMime, validateFileSize } from '../../utils/file-validation';
+import { ensureReasonableImage, resizeImage } from '../../utils/image-processing';
 
 export interface FileUploadRequest {
   file: Buffer;
@@ -72,11 +74,10 @@ export class FileStorageService {
   private static generateFilePath(employeeId: string, category: DocumentCategory, fileName: string): string {
     const timestamp = new Date().toISOString().split('T')[0];
     const uuid = uuidv4().split('-')[0];
-    const extension = path.extname(fileName);
-    const baseName = path.basename(fileName, extension);
-    const sanitizedBaseName = baseName.replace(/[^a-zA-Z0-9-_]/g, '_');
-
-    return `employees/${employeeId}/${category.toLowerCase()}/${timestamp}/${sanitizedBaseName}_${uuid}${extension}`;
+    const sanitized = sanitizeFileName(fileName);
+    const extension = path.extname(sanitized);
+    const baseName = path.basename(sanitized, extension);
+    return `employees/${employeeId}/${category.toLowerCase()}/${timestamp}/${baseName}_${uuid}${extension}`;
   }
 
   private static validateFile(
@@ -93,31 +94,13 @@ export class FileStorageService {
     }
 
     // Validate file size
-    if (fileBuffer.length > config.maxFileSize) {
-      throw new ValidationError(
-        `File size ${fileBuffer.length} exceeds maximum allowed size ${config.maxFileSize} for category ${category}`,
-        []
-      );
-    }
+    validateFileSize(fileBuffer.length, config.maxFileSize);
 
     // Validate MIME type
-    if (!config.allowedMimeTypes.includes(mimeType.toLowerCase())) {
-      throw new ValidationError(
-        `File type ${mimeType} not allowed for category ${category}. Allowed types: ${config.allowedMimeTypes.join(', ')}`,
-        []
-      );
-    }
+    assertAllowedMimeType(config.allowedMimeTypes, mimeType);
 
     // Validate file extension matches MIME type
-    const extension = path.extname(fileName).toLowerCase();
-    const expectedExtensions = this.getMimeTypeExtensions(mimeType);
-
-    if (!expectedExtensions.includes(extension)) {
-      throw new ValidationError(
-        `File extension ${extension} does not match MIME type ${mimeType}`,
-        []
-      );
-    }
+    validateFileExtensionMatchesMime(fileName, mimeType);
 
     // Additional validation for specific categories
     if (category === 'PASSPORT_PHOTO') {
@@ -126,7 +109,8 @@ export class FileStorageService {
   }
 
   private static getMimeTypeExtensions(mimeType: string): string[] {
-    const mimeTypeMap: Record<string, string[]> = {
+    // Deprecated in favor of utils/file-validation; kept for backward compatibility
+    const map: Record<string, string[]> = {
       'application/pdf': ['.pdf'],
       'image/jpeg': ['.jpg', '.jpeg'],
       'image/png': ['.png'],
@@ -134,8 +118,7 @@ export class FileStorageService {
       'application/msword': ['.doc'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx']
     };
-
-    return mimeTypeMap[mimeType.toLowerCase()] || [];
+    return map[mimeType.toLowerCase()] || [];
   }
 
   private static validatePassportPhoto(fileBuffer: Buffer, mimeType: string): void {
@@ -143,12 +126,12 @@ export class FileStorageService {
       throw new ValidationError('Passport photos must be image files', []);
     }
 
-    // Additional image validation could be added here
-    // e.g., checking dimensions, aspect ratio, etc.
-    // For now, we'll just validate it's a reasonable image file size
-    if (fileBuffer.length < 1024) { // Less than 1KB
+    // Ensure image is valid and has reasonable dimensions
+    if (fileBuffer.length < 1024) {
       throw new ValidationError('Image file appears to be too small or corrupted', []);
     }
+    // Validate image metadata
+    // Not awaited here to avoid blocking twice; validate in upload path
   }
 
   /**
@@ -173,9 +156,21 @@ export class FileStorageService {
 
       // Upload to Supabase Storage
       const client = supabase.getClient();
+      // Optionally resize images for passport photos per config
+      let fileToUpload = request.file;
+      if (request.category === 'PASSPORT_PHOTO') {
+        await ensureReasonableImage(request.file);
+        const cfg = this.BUCKET_CONFIGS['passport-photos'].configuration;
+        fileToUpload = await resizeImage(request.file, {
+          maxWidth: cfg.maxWidth || 800,
+          maxHeight: cfg.maxHeight || 800,
+          quality: cfg.quality || 85
+        });
+      }
+
       const { data, error } = await client.storage
         .from(bucketName)
-        .upload(filePath, request.file, {
+        .upload(filePath, fileToUpload, {
           contentType: request.mimeType,
           metadata: {
             employeeId: request.employeeId,
@@ -202,7 +197,7 @@ export class FileStorageService {
       return {
         filePath: data.path,
         fileName: request.fileName,
-        fileSize: request.file.length
+        fileSize: fileToUpload.length
       };
 
     } catch (error) {

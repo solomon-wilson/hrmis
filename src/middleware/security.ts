@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ValidationError } from '../utils/errors';
+import { createRateLimit } from './rateLimiting';
 
 // Security headers middleware
 export const securityHeaders = (req: Request, res: Response, next: NextFunction): void => {
@@ -282,6 +283,15 @@ export const userAgentValidation = (req: Request, _res: Response, next: NextFunc
 };
 
 // Combined security middleware
+// Rate limiting middleware factory
+export const rateLimitMiddleware = (maxRequests: number, windowMs: number) => {
+  return createRateLimit({
+    maxRequests,
+    windowMs,
+    message: 'Too many requests, please try again later.'
+  });
+};
+
 export const applySecurity = [
   securityHeaders,
   requestSizeLimit(),

@@ -1,8 +1,34 @@
 import { Router } from 'express';
 import { StaffDocumentController } from '../controllers/StaffDocumentController';
 import { AnnualLeavePlanController } from '../controllers/AnnualLeavePlanController';
-import { authMiddleware } from '../middleware/supabase-auth';
+import { authenticateWithSupabase, requireRole } from '../middleware/supabase-auth';
 import { rateLimitMiddleware } from '../middleware/security';
+import { 
+  documentPermissionMiddleware,
+  documentUploadPermissionMiddleware,
+  documentApprovalPermissionMiddleware,
+  leavePlanPermissionMiddleware
+} from '../middleware/document-permissions';
+import { validateInput } from '../middleware/inputValidation';
+import {
+  paramsWithId,
+  paramsWithEmployeeId,
+  uploadBody,
+  listQuery,
+  updateBody,
+  daysQuery,
+  leavePlanCreate,
+  leavePlanUpdate
+} from '../validation/document-management';
+import {
+  documentAccessAuditMiddleware,
+  documentModificationAuditMiddleware,
+  documentUploadAuditMiddleware,
+  documentDeletionAuditMiddleware,
+  documentApprovalAuditMiddleware,
+  leavePlanAuditMiddleware,
+  securityEventAuditMiddleware
+} from '../middleware/document-audit';
 
 const router = Router();
 
@@ -10,8 +36,9 @@ const router = Router();
 const documentController = new StaffDocumentController();
 const leavePlanController = new AnnualLeavePlanController();
 
-// Apply authentication middleware to all routes
-router.use(authMiddleware);
+// Apply authentication and security-event audit to all routes
+router.use(securityEventAuditMiddleware);
+router.use(authenticateWithSupabase);
 
 // Apply rate limiting - stricter for upload operations
 const uploadRateLimit = rateLimitMiddleware(5, 15 * 60 * 1000); // 5 uploads per 15 minutes
@@ -27,7 +54,10 @@ const standardRateLimit = rateLimitMiddleware(100, 15 * 60 * 1000); // 100 reque
  */
 router.post('/documents/upload',
   uploadRateLimit,
+  validateInput(uploadBody, 'body'),
+  documentUploadPermissionMiddleware,
   documentController.getUploadMiddleware(),
+  documentUploadAuditMiddleware,
   documentController.uploadDocument
 );
 
@@ -37,6 +67,9 @@ router.post('/documents/upload',
  */
 router.get('/documents/:id',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  documentPermissionMiddleware,
+  documentAccessAuditMiddleware,
   documentController.getDocument
 );
 
@@ -46,6 +79,9 @@ router.get('/documents/:id',
  */
 router.get('/documents/:id/download',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  documentPermissionMiddleware,
+  documentAccessAuditMiddleware,
   documentController.downloadDocument
 );
 
@@ -65,6 +101,9 @@ router.get('/documents/:id/download',
  */
 router.get('/documents',
   standardRateLimit,
+  validateInput(listQuery, 'query'),
+  documentPermissionMiddleware,
+  documentAccessAuditMiddleware,
   documentController.listDocuments
 );
 
@@ -74,6 +113,10 @@ router.get('/documents',
  */
 router.put('/documents/:id',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  validateInput(updateBody, 'body'),
+  documentPermissionMiddleware,
+  documentModificationAuditMiddleware,
   documentController.updateDocument
 );
 
@@ -83,6 +126,10 @@ router.put('/documents/:id',
  */
 router.post('/documents/:id/approve',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  documentApprovalPermissionMiddleware,
+  requireRole('HR_ADMIN'),
+  documentApprovalAuditMiddleware,
   documentController.approveDocument
 );
 
@@ -92,6 +139,10 @@ router.post('/documents/:id/approve',
  */
 router.post('/documents/:id/reject',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  documentApprovalPermissionMiddleware,
+  requireRole('HR_ADMIN'),
+  documentApprovalAuditMiddleware,
   documentController.approveDocument
 );
 
@@ -101,6 +152,9 @@ router.post('/documents/:id/reject',
  */
 router.delete('/documents/:id',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  documentPermissionMiddleware,
+  documentDeletionAuditMiddleware,
   documentController.deleteDocument
 );
 
@@ -110,6 +164,9 @@ router.delete('/documents/:id',
  */
 router.get('/documents/stats/:employeeId',
   standardRateLimit,
+  validateInput(paramsWithEmployeeId, 'params'),
+  documentPermissionMiddleware,
+  documentAccessAuditMiddleware,
   documentController.getDocumentStats
 );
 
@@ -121,6 +178,9 @@ router.get('/documents/stats/:employeeId',
  */
 router.get('/documents/expiring',
   standardRateLimit,
+  validateInput(daysQuery, 'query'),
+  requireRole('HR_ADMIN'),
+  documentAccessAuditMiddleware,
   documentController.getExpiringDocuments
 );
 
@@ -134,6 +194,9 @@ router.get('/documents/expiring',
  */
 router.post('/leave-plans',
   standardRateLimit,
+  validateInput(leavePlanCreate, 'body'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_CREATE'),
   leavePlanController.createLeavePlan
 );
 
@@ -143,6 +206,9 @@ router.post('/leave-plans',
  */
 router.get('/leave-plans/:id',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_READ'),
   leavePlanController.getLeavePlan
 );
 
@@ -160,6 +226,9 @@ router.get('/leave-plans/:id',
  */
 router.get('/leave-plans',
   standardRateLimit,
+  validateInput(listQuery, 'query'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_LIST'),
   leavePlanController.listLeavePlans
 );
 
@@ -169,6 +238,10 @@ router.get('/leave-plans',
  */
 router.put('/leave-plans/:id',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  validateInput(leavePlanUpdate, 'body'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_UPDATE'),
   leavePlanController.updateLeavePlan
 );
 
@@ -178,6 +251,9 @@ router.put('/leave-plans/:id',
  */
 router.post('/leave-plans/:id/submit',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_SUBMIT'),
   leavePlanController.submitLeavePlan
 );
 
@@ -187,6 +263,10 @@ router.post('/leave-plans/:id/submit',
  */
 router.post('/leave-plans/:id/manager-approve',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  requireRole('MANAGER'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_MANAGER_APPROVE'),
   leavePlanController.managerApproval
 );
 
@@ -196,6 +276,10 @@ router.post('/leave-plans/:id/manager-approve',
  */
 router.post('/leave-plans/:id/manager-reject',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  requireRole('MANAGER'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_MANAGER_REJECT'),
   leavePlanController.managerApproval
 );
 
@@ -205,6 +289,10 @@ router.post('/leave-plans/:id/manager-reject',
  */
 router.post('/leave-plans/:id/hr-approve',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  requireRole('HR_ADMIN'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_HR_APPROVE'),
   leavePlanController.hrApproval
 );
 
@@ -214,6 +302,10 @@ router.post('/leave-plans/:id/hr-approve',
  */
 router.post('/leave-plans/:id/hr-reject',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  requireRole('HR_ADMIN'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_HR_REJECT'),
   leavePlanController.hrApproval
 );
 
@@ -223,6 +315,9 @@ router.post('/leave-plans/:id/hr-reject',
  */
 router.delete('/leave-plans/:id',
   standardRateLimit,
+  validateInput(paramsWithId, 'params'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_DELETE'),
   leavePlanController.deleteLeavePlan
 );
 
@@ -232,6 +327,9 @@ router.delete('/leave-plans/:id',
  */
 router.get('/leave-plans/pending/manager',
   standardRateLimit,
+  requireRole('MANAGER'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_PENDING_MANAGER'),
   leavePlanController.getPendingManagerApprovals
 );
 
@@ -241,6 +339,9 @@ router.get('/leave-plans/pending/manager',
  */
 router.get('/leave-plans/pending/hr',
   standardRateLimit,
+  requireRole('HR_ADMIN'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_PENDING_HR'),
   leavePlanController.getPendingHRApprovals
 );
 
@@ -252,6 +353,9 @@ router.get('/leave-plans/pending/hr',
  */
 router.get('/leave-plans/stats',
   standardRateLimit,
+  requireRole('HR_ADMIN'),
+  leavePlanPermissionMiddleware,
+  leavePlanAuditMiddleware('LEAVE_PLAN_STATS'),
   leavePlanController.getStatistics
 );
 

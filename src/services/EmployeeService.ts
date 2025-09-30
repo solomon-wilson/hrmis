@@ -5,6 +5,10 @@ import { AuditLogRepository } from '../database/repositories/audit';
 import { PaginationOptions, PaginatedResult } from '../database/repositories/base';
 import { ValidationError } from '../utils/validation';
 import { database } from '../database/connection';
+import { StaffDocumentRepository, DocumentSearchCriteria } from '../database/repositories/StaffDocumentRepository';
+import { DocumentCategory, DocumentStatus, StaffDocument } from '../models/document-management';
+import { FileStorageService } from './document-management/FileStorageService';
+import { logger } from '../utils/logger';
 
 export interface CreateEmployeeRequest {
   employeeId: string;
@@ -72,10 +76,12 @@ export interface OrganizationalChartNode {
 export class EmployeeService {
   private employeeRepository: EmployeeRepository;
   private auditLogRepository: AuditLogRepository;
+  private staffDocumentRepository: StaffDocumentRepository;
 
   constructor() {
     this.employeeRepository = new EmployeeRepository();
     this.auditLogRepository = new AuditLogRepository();
+    this.staffDocumentRepository = new StaffDocumentRepository();
   }
 
 
@@ -1140,5 +1146,461 @@ export class EmployeeService {
       status_notes: status.notes,
       updated_by: updatedBy
     };
+  }
+
+  // ==============================================
+  // DOCUMENT INTEGRATION METHODS
+  // ==============================================
+
+  /**
+   * Get document summary for employee profile
+   */
+  async getEmployeeDocumentSummary(
+    employeeId: string,
+    permissionContext: PermissionContext
+  ): Promise<{
+    totalDocuments: number;
+    documentsByCategory: Record<DocumentCategory, number>;
+    documentsByStatus: Record<DocumentStatus, number>;
+    expiringDocuments: number;
+    passportPhotoUrl?: string;
+    missingRequiredDocuments: DocumentCategory[];
+    lastUpdated?: Date;
+  }> {
+    try {
+      // Check permissions
+      if (!this.canAccessEmployeeDocuments(employeeId, permissionContext)) {
+        throw new ValidationError('Insufficient permissions to access employee documents', []);
+      }
+
+      logger.info('Getting document summary for employee', {
+        employeeId,
+        requestedBy: permissionContext.userId
+      });
+
+      // Get document statistics
+      const stats = await this.staffDocumentRepository.getDocumentStats(employeeId);
+
+      // Get passport photo URL if available
+      let passportPhotoUrl: string | undefined;
+      try {
+        const passportPhotos = await this.staffDocumentRepository.search({
+          employeeId,
+          category: 'PASSPORT_PHOTO',
+          status: 'APPROVED'
+        }, { limit: 1, sortBy: 'created_at', sortOrder: 'desc' });
+
+        if (passportPhotos.documents.length > 0) {
+          const latestPhoto = passportPhotos.documents[0];
+          passportPhotoUrl = await FileStorageService.getDownloadUrl(
+            latestPhoto.filePath,
+            'PASSPORT_PHOTO'
+          );
+        }
+      } catch (error) {
+        logger.warn('Failed to get passport photo', {
+          employeeId,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+
+      // Check for missing required documents
+      const requiredDocuments: DocumentCategory[] = [
+        'PERSONAL_IDENTIFICATION',
+        'EMPLOYMENT_CONTRACT',
+        'PASSPORT_PHOTO'
+      ];
+
+      const missingRequiredDocuments = requiredDocuments.filter(
+        category => !stats.byCategory[category] || stats.byCategory[category] === 0
+      );
+
+      // Get last update date from most recent document
+      const recentDocuments = await this.staffDocumentRepository.search({
+        employeeId
+      }, { limit: 1, sortBy: 'updated_at', sortOrder: 'desc' });
+
+      const lastUpdated = recentDocuments.documents.length > 0
+        ? recentDocuments.documents[0].updatedAt
+        : undefined;
+
+      return {
+        totalDocuments: stats.total,
+        documentsByCategory: stats.byCategory,
+        documentsByStatus: stats.byStatus,
+        expiringDocuments: stats.expiring,
+        passportPhotoUrl,
+        missingRequiredDocuments,
+        lastUpdated
+      };
+
+    } catch (error) {
+      logger.error('Error getting employee document summary', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        employeeId,
+        requestedBy: permissionContext.userId
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Get passport photo URL for employee display
+   */
+  async getEmployeePassportPhoto(
+    employeeId: string,
+    permissionContext: PermissionContext
+  ): Promise<string | null> {
+    try {
+      // Check permissions
+      if (!this.canAccessEmployeeDocuments(employeeId, permissionContext)) {
+        throw new ValidationError('Insufficient permissions to access employee photo', []);
+      }
+
+      logger.info('Getting passport photo for employee', {
+        employeeId,
+        requestedBy: permissionContext.userId
+      });
+
+      // Find the most recent approved passport photo
+      const photos = await this.staffDocumentRepository.search({
+        employeeId,
+        category: 'PASSPORT_PHOTO',
+        status: 'APPROVED'
+      }, {
+        limit: 1,
+        sortBy: 'created_at',
+        sortOrder: 'desc'
+      });
+
+      if (photos.documents.length === 0) {
+        return null;
+      }
+
+      const photo = photos.documents[0];
+      return await FileStorageService.getDownloadUrl(photo.filePath, 'PASSPORT_PHOTO');
+
+    } catch (error) {
+      logger.error('Error getting employee passport photo', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        employeeId,
+        requestedBy: permissionContext.userId
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Check document requirements for employee
+   */
+  async checkEmployeeDocumentRequirements(
+    employeeId: string,
+    permissionContext: PermissionContext
+  ): Promise<{
+    isCompliant: boolean;
+    requiredDocuments: Array<{
+      category: DocumentCategory;
+      required: boolean;
+      present: boolean;
+      status?: DocumentStatus;
+      expiresAt?: Date;
+      isExpired: boolean;
+      isExpiringSoon: boolean; // Within 30 days
+    }>;
+    complianceScore: number; // Percentage of required documents that are present and valid
+  }> {
+    try {
+      // Check permissions
+      if (!this.canAccessEmployeeDocuments(employeeId, permissionContext)) {
+        throw new ValidationError('Insufficient permissions to check document requirements', []);
+      }
+
+      logger.info('Checking document requirements for employee', {
+        employeeId,
+        requestedBy: permissionContext.userId
+      });
+
+      // Get employee info to determine requirements based on role/type
+      const employee = await this.employeeRepository.findById(employeeId);
+      if (!employee) {
+        throw new ValidationError('Employee not found', []);
+      }
+
+      // Define document requirements based on employee type
+      const requirements = this.getDocumentRequirements(employee);
+
+      // Get all employee documents
+      const allDocuments = await this.staffDocumentRepository.search({
+        employeeId
+      }, { limit: 100 });
+
+      // Group documents by category (get the most recent approved one for each category)
+      const documentsByCategory = new Map<DocumentCategory, StaffDocument>();
+
+      allDocuments.documents
+        .filter(doc => doc.status === 'APPROVED')
+        .forEach(doc => {
+          const existing = documentsByCategory.get(doc.category);
+          if (!existing || doc.createdAt > existing.createdAt) {
+            documentsByCategory.set(doc.category, doc);
+          }
+        });
+
+      const now = new Date();
+      const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+      // Check each requirement
+      const requiredDocuments = requirements.map(req => {
+        const document = documentsByCategory.get(req.category);
+        const isExpired = document?.expiresAt ? document.expiresAt < now : false;
+        const isExpiringSoon = document?.expiresAt ?
+          document.expiresAt <= thirtyDaysFromNow && document.expiresAt > now : false;
+
+        return {
+          category: req.category,
+          required: req.required,
+          present: !!document,
+          status: document?.status,
+          expiresAt: document?.expiresAt,
+          isExpired,
+          isExpiringSoon
+        };
+      });
+
+      // Calculate compliance
+      const requiredDocs = requiredDocuments.filter(doc => doc.required);
+      const compliantDocs = requiredDocs.filter(doc =>
+        doc.present && !doc.isExpired && doc.status === 'APPROVED'
+      );
+
+      const complianceScore = requiredDocs.length > 0
+        ? Math.round((compliantDocs.length / requiredDocs.length) * 100)
+        : 100;
+
+      const isCompliant = complianceScore === 100;
+
+      return {
+        isCompliant,
+        requiredDocuments,
+        complianceScore
+      };
+
+    } catch (error) {
+      logger.error('Error checking employee document requirements', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        employeeId,
+        requestedBy: permissionContext.userId
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Get employee document statistics for reporting
+   */
+  async getEmployeeDocumentStatistics(
+    employeeId: string,
+    permissionContext: PermissionContext
+  ): Promise<{
+    summary: {
+      totalDocuments: number;
+      approvedDocuments: number;
+      pendingDocuments: number;
+      rejectedDocuments: number;
+      expiredDocuments: number;
+      expiringDocuments: number;
+    };
+    categoryBreakdown: Record<DocumentCategory, {
+      total: number;
+      approved: number;
+      pending: number;
+      rejected: number;
+      expired: number;
+    }>;
+    recentActivity: Array<{
+      action: string;
+      documentTitle: string;
+      category: DocumentCategory;
+      date: Date;
+      status: DocumentStatus;
+    }>;
+  }> {
+    try {
+      // Check permissions
+      if (!this.canAccessEmployeeDocuments(employeeId, permissionContext)) {
+        throw new ValidationError('Insufficient permissions to access employee document statistics', []);
+      }
+
+      logger.info('Getting document statistics for employee', {
+        employeeId,
+        requestedBy: permissionContext.userId
+      });
+
+      // Get basic stats
+      const stats = await this.staffDocumentRepository.getDocumentStats(employeeId);
+
+      // Get all documents for detailed breakdown
+      const allDocuments = await this.staffDocumentRepository.search({
+        employeeId
+      }, { limit: 100 });
+
+      const now = new Date();
+      const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+      // Calculate summary statistics
+      const expiredDocuments = allDocuments.documents.filter(doc =>
+        doc.expiresAt && doc.expiresAt < now && doc.status === 'APPROVED'
+      ).length;
+
+      const expiringDocuments = allDocuments.documents.filter(doc =>
+        doc.expiresAt && doc.expiresAt <= thirtyDaysFromNow && doc.expiresAt > now && doc.status === 'APPROVED'
+      ).length;
+
+      const summary = {
+        totalDocuments: stats.total,
+        approvedDocuments: stats.byStatus['APPROVED'] || 0,
+        pendingDocuments: stats.byStatus['PENDING'] || 0,
+        rejectedDocuments: stats.byStatus['REJECTED'] || 0,
+        expiredDocuments,
+        expiringDocuments
+      };
+
+      // Category breakdown
+      const categoryBreakdown: Record<DocumentCategory, any> = {} as any;
+
+      Object.keys(stats.byCategory).forEach(category => {
+        const categoryDocs = allDocuments.documents.filter(doc => doc.category === category);
+
+        categoryBreakdown[category as DocumentCategory] = {
+          total: categoryDocs.length,
+          approved: categoryDocs.filter(doc => doc.status === 'APPROVED').length,
+          pending: categoryDocs.filter(doc => doc.status === 'PENDING').length,
+          rejected: categoryDocs.filter(doc => doc.status === 'REJECTED').length,
+          expired: categoryDocs.filter(doc =>
+            doc.expiresAt && doc.expiresAt < now && doc.status === 'APPROVED'
+          ).length
+        };
+      });
+
+      // Recent activity (last 10 documents)
+      const recentDocs = await this.staffDocumentRepository.search({
+        employeeId
+      }, { limit: 10, sortBy: 'updated_at', sortOrder: 'desc' });
+
+      const recentActivity = recentDocs.documents.map(doc => ({
+        action: this.getDocumentAction(doc),
+        documentTitle: doc.title,
+        category: doc.category,
+        date: doc.updatedAt,
+        status: doc.status
+      }));
+
+      return {
+        summary,
+        categoryBreakdown,
+        recentActivity
+      };
+
+    } catch (error) {
+      logger.error('Error getting employee document statistics', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        employeeId,
+        requestedBy: permissionContext.userId
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Check if user can access employee documents
+   */
+  private canAccessEmployeeDocuments(employeeId: string, permissionContext: PermissionContext): boolean {
+    // HR Admin can access all documents
+    if (permissionContext.role === 'HR_ADMIN') {
+      return true;
+    }
+
+    // Employees can access their own documents
+    if (permissionContext.userId === employeeId) {
+      return true;
+    }
+
+    // Managers can access their direct reports' documents
+    if (permissionContext.role === 'MANAGER' &&
+        permissionContext.managedEmployeeIds?.includes(employeeId)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Get document requirements based on employee type
+   */
+  private getDocumentRequirements(employee: Employee): Array<{
+    category: DocumentCategory;
+    required: boolean;
+    description: string;
+  }> {
+    const baseRequirements = [
+      {
+        category: 'PERSONAL_IDENTIFICATION' as DocumentCategory,
+        required: true,
+        description: 'Government-issued ID (passport, driver\'s license, etc.)'
+      },
+      {
+        category: 'EMPLOYMENT_CONTRACT' as DocumentCategory,
+        required: true,
+        description: 'Signed employment contract'
+      },
+      {
+        category: 'PASSPORT_PHOTO' as DocumentCategory,
+        required: true,
+        description: 'Professional passport-style photograph'
+      },
+      {
+        category: 'EMERGENCY_CONTACT' as DocumentCategory,
+        required: true,
+        description: 'Emergency contact information form'
+      },
+      {
+        category: 'BANK_DETAILS' as DocumentCategory,
+        required: true,
+        description: 'Bank details for payroll'
+      }
+    ];
+
+    // Add additional requirements based on employment type or other factors
+    const additionalRequirements = [];
+
+    if (employee.jobInfo.employmentType === 'FULL_TIME') {
+      additionalRequirements.push({
+        category: 'TAX_INFORMATION' as DocumentCategory,
+        required: true,
+        description: 'Tax forms and declarations'
+      });
+    }
+
+    return [...baseRequirements, ...additionalRequirements];
+  }
+
+  /**
+   * Determine the action based on document status and timing
+   */
+  private getDocumentAction(document: StaffDocument): string {
+    const now = new Date();
+    const timeSinceUpdate = now.getTime() - document.updatedAt.getTime();
+    const daysSinceUpdate = timeSinceUpdate / (1000 * 60 * 60 * 24);
+
+    if (daysSinceUpdate < 1) {
+      switch (document.status) {
+        case 'PENDING': return 'Uploaded';
+        case 'APPROVED': return 'Approved';
+        case 'REJECTED': return 'Rejected';
+        default: return 'Updated';
+      }
+    } else {
+      return 'Modified';
+    }
   }
 }

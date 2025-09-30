@@ -76,9 +76,53 @@ router.delete('/:id',
  * Get employee status history
  * Requires: Permission to access the specific employee
  */
-router.get('/:id/history', 
+router.get('/:id/history',
   canAccessEmployee,
   employeeController.getEmployeeHistory
+);
+
+// ==============================================
+// DOCUMENT INTEGRATION ROUTES
+// ==============================================
+
+/**
+ * GET /api/employees/:id/documents/summary
+ * Get employee document summary for profile display
+ * Requires: Permission to access the specific employee
+ */
+router.get('/:id/documents/summary',
+  canAccessEmployee,
+  employeeController.getEmployeeDocumentSummary
+);
+
+/**
+ * GET /api/employees/:id/passport-photo
+ * Get employee passport photo URL
+ * Requires: Permission to access the specific employee
+ */
+router.get('/:id/passport-photo',
+  canAccessEmployee,
+  employeeController.getEmployeePassportPhoto
+);
+
+/**
+ * GET /api/employees/:id/documents/requirements
+ * Check employee document requirements status
+ * Requires: Permission to access the specific employee
+ */
+router.get('/:id/documents/requirements',
+  canAccessEmployee,
+  employeeController.getEmployeeDocumentRequirements
+);
+
+/**
+ * GET /api/employees/:id/documents/statistics
+ * Get employee document statistics for reporting
+ * Requires: Permission to access the specific employee (typically HR/Manager)
+ */
+router.get('/:id/documents/statistics',
+  canAccessEmployee,
+  employeeController.getEmployeeDocumentStatistics
 );
 
 export { router as employeeRoutes };

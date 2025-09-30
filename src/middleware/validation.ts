@@ -234,3 +234,22 @@ export const validateRequest = (schemaName: keyof typeof validationSchemas) => {
       });
   };
 };
+
+// Export a specific query validation function for monitoring routes
+export const validateQuery = (schema: Joi.ObjectSchema) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const { error, value } = schema.validate(req.query);
+    if (error) {
+      res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid query parameters',
+          details: error.details
+        }
+      });
+      return;
+    }
+    req.query = value;
+    next();
+  };
+};

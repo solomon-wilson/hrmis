@@ -20,7 +20,7 @@ const timeRangeSchema = Joi.object({
  */
 router.get('/metrics',
   authenticate,
-  authorize(['HR_ADMIN']),
+  authorize('report', 'view_reports'),
   validateQuery(timeRangeSchema),
   MonitoringController.getMetrics
 );
@@ -32,7 +32,7 @@ router.get('/metrics',
  */
 router.get('/errors',
   authenticate,
-  authorize(['HR_ADMIN']),
+  authorize('report', 'view_reports'),
   validateQuery(timeRangeSchema),
   MonitoringController.getErrors
 );
@@ -44,7 +44,7 @@ router.get('/errors',
  */
 router.get('/performance',
   authenticate,
-  authorize(['HR_ADMIN']),
+  authorize('report', 'view_reports'),
   validateQuery(timeRangeSchema),
   MonitoringController.getPerformance
 );
@@ -67,7 +67,7 @@ router.get('/health',
  */
 router.get('/prometheus',
   authenticate,
-  authorize(['HR_ADMIN']),
+  authorize('report', 'view_reports'),
   validateQuery(timeRangeSchema),
   MonitoringController.getPrometheusMetrics
 );

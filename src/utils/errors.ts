@@ -86,6 +86,24 @@ export class ExternalServiceError extends AppError {
   }
 }
 
+// Document/file specific errors
+export class FileUploadError extends AppError {
+  constructor(message: string, details?: any, statusCode: number = 400) {
+    super(message, 'FILE_UPLOAD_ERROR', statusCode, details);
+  }
+}
+
+export class StorageQuotaExceededError extends AppError {
+  constructor(quotaBytes: number, currentUsageBytes: number, attemptedBytes: number) {
+    super(
+      'Storage quota exceeded',
+      'STORAGE_QUOTA_EXCEEDED',
+      413,
+      { quotaBytes, currentUsageBytes, attemptedBytes }
+    );
+  }
+}
+
 // Error response interface
 export interface ErrorResponse {
   error: {
@@ -192,5 +210,22 @@ export function mapJWTError(error: any): AppError {
     
     default:
       return new AuthenticationError('Token validation failed');
+  }
+}
+
+// Multer error mapping
+export function mapMulterError(error: any): AppError | null {
+  if (!error || !error.code) return null;
+
+  // Multer error codes: https://github.com/expressjs/multer#error-handling
+  switch (error.code) {
+    case 'LIMIT_FILE_SIZE':
+      return new FileUploadError('Uploaded file is too large', { limit: error.limit }, 413);
+    case 'LIMIT_FILE_COUNT':
+      return new FileUploadError('Too many files uploaded', { limit: error.limit }, 400);
+    case 'LIMIT_UNEXPECTED_FILE':
+      return new FileUploadError('Unexpected file field', { field: error.field }, 400);
+    default:
+      return new FileUploadError('File upload failed', { code: error.code, message: error.message }, 400);
   }
 }
