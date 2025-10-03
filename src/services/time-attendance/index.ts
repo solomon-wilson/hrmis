@@ -1,7 +1,14 @@
 // Time and Attendance Services
-// This file will be populated with service exports as they are implemented
+// Exported services for time tracking, leave management, and policy enforcement
 
+// Time Tracking Services
 export * from './TimeTrackingService';
-export * from './LeaveManagementService';
-export * from './PolicyEngine';
-export * from './TimeCalculationEngine';
+
+// Leave Management Services (to be implemented)
+// export * from './LeaveManagementService';
+
+// Policy Engine (to be implemented)
+// export * from './PolicyEngine';
+
+// Time Calculation Engine (to be implemented)
+// export * from './TimeCalculationEngine';
