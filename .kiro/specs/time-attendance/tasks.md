@@ -116,8 +116,8 @@
   - Write unit tests for status tracking and anomaly detection
   - _Requirements: 6.2, 7.1, 7.2_
 
-- [ ] 6. Implement leave management business services
-- [ ] 6.1 Create LeaveManagementService with request processing
+- [x] 6. Implement leave management business services
+- [x] 6.1 Create LeaveManagementService with request processing
 
   - Implement submitLeaveRequest method with validation and conflict checking
   - Add leave eligibility checking with policy enforcement
@@ -125,7 +125,7 @@
   - Write unit tests for leave request processing and validation
   - _Requirements: 2.1, 2.2, 2.5_
 
-- [ ] 6.2 Add leave approval workflow functionality
+- [x] 6.2 Add leave approval workflow functionality
 
   - Implement approveLeaveRequest and denyLeaveRequest methods
   - Add notification system integration for approval status updates
@@ -133,7 +133,7 @@
   - Write unit tests for approval workflow scenarios
   - _Requirements: 3.1, 3.2, 3.3, 3.4_
 
-- [ ] 6.3 Implement leave balance management
+- [x] 6.3 Implement leave balance management
 
   - Add getLeaveBalance method with real-time balance calculations
   - Create automatic accrual processing with scheduled job support

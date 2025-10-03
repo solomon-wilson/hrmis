@@ -4,8 +4,8 @@
 // Time Tracking Services
 export * from './TimeTrackingService';
 
-// Leave Management Services (to be implemented)
-// export * from './LeaveManagementService';
+// Leave Management Services
+export * from './LeaveManagementService';
 
 // Policy Engine (to be implemented)
 // export * from './PolicyEngine';
