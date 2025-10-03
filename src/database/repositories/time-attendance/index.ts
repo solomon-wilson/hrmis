@@ -11,3 +11,7 @@ export * from './LeaveBalanceRepository';
 
 // Policy Management Repository
 export * from './PolicyRepository';
+
+// Reporting and Analytics Repositories
+export * from './TimeReportRepository';
+export * from './LeaveReportRepository';

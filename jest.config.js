@@ -22,4 +22,6 @@ module.exports = {
     '^@database/(.*)$': '<rootDir>/src/database/$1',
     '^@utils/(.*)$': '<rootDir>/src/utils/$1',
   },
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
+  testPathIgnorePatterns: ['/node_modules/', '/dist/'],
 };

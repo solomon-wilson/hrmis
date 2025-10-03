@@ -47,7 +47,6 @@
 
 - [x] 3.2 Implement LeaveBalance model with accrual tracking
 
-
   - Create LeaveBalance class with balance calculations and accrual methods
   - Add methods for balance updates, carryover calculations, and usage tracking
   - Implement accrual transaction logging for audit purposes
@@ -55,10 +54,6 @@
   - _Requirements: 2.1, 4.2, 4.4, 7.3_
 
 - [x] 3.3 Create leave policy configuration models
-
-
-
-
 
   - Implement LeavePolicy and OvertimePolicy classes with rule definitions
   - Add policy validation methods and eligibility checking
@@ -83,7 +78,7 @@
   - Write unit tests for leave management repository operations
   - _Requirements: 2.1, 2.2, 3.1, 4.1, 7.3, 7.4_
 
-- [ ] 4.3 Create reporting and analytics repositories
+- [x] 4.3 Create reporting and analytics repositories
 
   - Implement TimeReportRepository for attendance and hours reporting
   - Add LeaveReportRepository for leave usage and balance reporting
@@ -91,8 +86,15 @@
   - Write unit tests for reporting repository methods
   - _Requirements: 5.1, 5.2, 5.4, 6.1, 6.2_
 
-- [ ] 5. Implement time tracking business services
-- [ ] 5.1 Create TimeTrackingService with clock operations
+- [-] 5. Implement time tracking business services
+
+
+
+
+
+- [-] 5.1 Create TimeTrackingService with clock operations
+
+
 
   - Implement clockIn method with duplicate prevention and location validation
   - Add clockOut method with time calculation and validation
