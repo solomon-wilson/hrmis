@@ -1221,4 +1221,327 @@ describe('TimeTrackingService', () => {
       expect(result[1].status).toBe('PENDING_APPROVAL');
     });
   });
+
+  describe('getEmployeeDashboard', () => {
+    const mockEmployeeId = 'emp-123';
+
+    it('should return complete dashboard data for employee', async () => {
+      const mockStatus = {
+        id: 'status-123',
+        employeeId: mockEmployeeId,
+        currentStatus: 'CLOCKED_IN' as const,
+        activeTimeEntryId: 'entry-123',
+        lastClockInTime: new Date('2024-01-15T09:00:00Z'),
+        totalHoursToday: 0,
+        lastUpdated: new Date()
+      } as EmployeeTimeStatus;
+
+      const mockTodayEntries = [
+        {
+          id: 'entry-123',
+          employeeId: mockEmployeeId,
+          clockInTime: new Date('2024-01-15T09:00:00Z'),
+          status: 'ACTIVE' as const,
+          manualEntry: false,
+          breakEntries: [],
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as TimeEntry
+      ];
+
+      mockTimeEntryRepo.getEmployeeTimeStatus.mockResolvedValue(mockStatus);
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: mockTodayEntries,
+        pagination: { page: 1, limit: 10, total: 1, totalPages: 1 }
+      });
+      mockTimeEntryRepo.findIncompleteEntries.mockResolvedValue([]);
+
+      const result = await service.getEmployeeDashboard(mockEmployeeId);
+
+      expect(result.employeeId).toBe(mockEmployeeId);
+      expect(result.currentStatus).toBe('CLOCKED_IN');
+      expect(result.todayEntries).toHaveLength(1);
+      expect(result.anomalies).toBeDefined();
+      expect(result.incompleteEntries).toBeDefined();
+    });
+
+    it('should calculate total hours including current session', async () => {
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+      const mockStatus = {
+        id: 'status-123',
+        employeeId: mockEmployeeId,
+        currentStatus: 'CLOCKED_IN' as const,
+        activeTimeEntryId: 'entry-123',
+        lastClockInTime: twoHoursAgo,
+        totalHoursToday: 0,
+        lastUpdated: new Date()
+      } as EmployeeTimeStatus;
+
+      mockTimeEntryRepo.getEmployeeTimeStatus.mockResolvedValue(mockStatus);
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: [],
+        pagination: { page: 1, limit: 10, total: 0, totalPages: 0 }
+      });
+      mockTimeEntryRepo.findIncompleteEntries.mockResolvedValue([]);
+
+      const result = await service.getEmployeeDashboard(mockEmployeeId);
+
+      expect(result.totalHoursToday).toBeGreaterThan(1.9); // Approximately 2 hours
+      expect(result.totalHoursToday).toBeLessThan(2.1);
+    });
+  });
+
+  describe('detectEmployeeAnomalies', () => {
+    const mockEmployeeId = 'emp-123';
+
+    it('should detect missing clock-out anomaly', async () => {
+      const longAgo = new Date(Date.now() - 25 * 60 * 60 * 1000); // 25 hours ago
+
+      const mockEntries = [
+        {
+          id: 'entry-123',
+          employeeId: mockEmployeeId,
+          clockInTime: longAgo,
+          status: 'ACTIVE' as const,
+          manualEntry: false,
+          breakEntries: [],
+          createdAt: longAgo,
+          updatedAt: longAgo
+        } as TimeEntry
+      ];
+
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: mockEntries,
+        pagination: { page: 1, limit: 10, total: 1, totalPages: 1 }
+      });
+
+      const result = await service.detectEmployeeAnomalies(mockEmployeeId);
+
+      expect(result.length).toBeGreaterThan(0);
+      expect(result.some(a => a.type === 'MISSING_CLOCK_OUT')).toBe(true);
+      expect(result.find(a => a.type === 'MISSING_CLOCK_OUT')?.severity).toBe('HIGH');
+    });
+
+    it('should detect excessive hours anomaly', async () => {
+      const mockEntries = [
+        {
+          id: 'entry-123',
+          employeeId: mockEmployeeId,
+          clockInTime: new Date('2024-01-15T09:00:00Z'),
+          clockOutTime: new Date('2024-01-16T02:00:00Z'),
+          status: 'COMPLETED' as const,
+          totalHours: 17,
+          manualEntry: false,
+          breakEntries: [],
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as TimeEntry
+      ];
+
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: mockEntries,
+        pagination: { page: 1, limit: 10, total: 1, totalPages: 1 }
+      });
+
+      const result = await service.detectEmployeeAnomalies(mockEmployeeId);
+
+      expect(result.some(a => a.type === 'EXCESSIVE_HOURS')).toBe(true);
+      expect(result.find(a => a.type === 'EXCESSIVE_HOURS')?.severity).toBe('HIGH');
+    });
+
+    it('should detect unusual hours anomaly', async () => {
+      const veryEarlyMorning = new Date('2024-01-15T03:00:00Z');
+
+      const mockEntries = [
+        {
+          id: 'entry-123',
+          employeeId: mockEmployeeId,
+          clockInTime: veryEarlyMorning,
+          clockOutTime: new Date('2024-01-15T11:00:00Z'),
+          status: 'COMPLETED' as const,
+          totalHours: 8,
+          manualEntry: false,
+          breakEntries: [],
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as TimeEntry
+      ];
+
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: mockEntries,
+        pagination: { page: 1, limit: 10, total: 1, totalPages: 1 }
+      });
+
+      const result = await service.detectEmployeeAnomalies(mockEmployeeId);
+
+      expect(result.some(a => a.type === 'UNUSUAL_HOURS')).toBe(true);
+      expect(result.find(a => a.type === 'UNUSUAL_HOURS')?.severity).toBe('LOW');
+    });
+
+    it('should detect weekend work anomaly', async () => {
+      // Create a Saturday date
+      const saturday = new Date('2024-01-13T09:00:00Z'); // Saturday
+
+      const mockEntries = [
+        {
+          id: 'entry-123',
+          employeeId: mockEmployeeId,
+          clockInTime: saturday,
+          clockOutTime: new Date('2024-01-13T17:00:00Z'),
+          status: 'COMPLETED' as const,
+          totalHours: 8,
+          manualEntry: false,
+          breakEntries: [],
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as TimeEntry
+      ];
+
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: mockEntries,
+        pagination: { page: 1, limit: 10, total: 1, totalPages: 1 }
+      });
+
+      const result = await service.detectEmployeeAnomalies(mockEmployeeId);
+
+      expect(result.some(a => a.type === 'WEEKEND_WORK')).toBe(true);
+      expect(result.find(a => a.type === 'WEEKEND_WORK')?.severity).toBe('LOW');
+    });
+
+    it('should detect short entry anomaly', async () => {
+      const mockEntries = [
+        {
+          id: 'entry-123',
+          employeeId: mockEmployeeId,
+          clockInTime: new Date('2024-01-15T09:00:00Z'),
+          clockOutTime: new Date('2024-01-15T09:30:00Z'),
+          status: 'COMPLETED' as const,
+          totalHours: 0.5,
+          manualEntry: false,
+          breakEntries: [],
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as TimeEntry
+      ];
+
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: mockEntries,
+        pagination: { page: 1, limit: 10, total: 1, totalPages: 1 }
+      });
+
+      const result = await service.detectEmployeeAnomalies(mockEmployeeId);
+
+      expect(result.some(a => a.type === 'SHORT_ENTRY')).toBe(true);
+      expect(result.find(a => a.type === 'SHORT_ENTRY')?.severity).toBe('LOW');
+    });
+  });
+
+  describe('getTeamDashboard', () => {
+    const mockTeamIds = ['emp-1', 'emp-2', 'emp-3'];
+
+    it('should return team dashboard with summary statistics', async () => {
+      mockTimeEntryRepo.getEmployeeTimeStatus.mockResolvedValue({
+        id: 'status-123',
+        employeeId: 'emp-1',
+        currentStatus: 'CLOCKED_IN' as const,
+        totalHoursToday: 5,
+        lastClockInTime: new Date(),
+        lastUpdated: new Date()
+      } as EmployeeTimeStatus);
+
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: [],
+        pagination: { page: 1, limit: 10, total: 0, totalPages: 0 }
+      });
+
+      mockTimeEntryRepo.findIncompleteEntries.mockResolvedValue([]);
+
+      const result = await service.getTeamDashboard(mockTeamIds);
+
+      expect(result.teamStatuses).toHaveLength(3);
+      expect(result.summary.totalEmployees).toBe(3);
+      expect(result.summary.clockedInCount).toBeGreaterThanOrEqual(0);
+      expect(result.summary.totalAnomalies).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should calculate correct summary statistics', async () => {
+      let callCount = 0;
+      mockTimeEntryRepo.getEmployeeTimeStatus.mockImplementation(async () => {
+        const statuses = [
+          {
+            id: 'status-1',
+            employeeId: 'emp-1',
+            currentStatus: 'CLOCKED_IN' as const,
+            totalHoursToday: 5,
+            lastClockInTime: new Date(),
+            lastUpdated: new Date()
+          },
+          {
+            id: 'status-2',
+            employeeId: 'emp-2',
+            currentStatus: 'ON_BREAK' as const,
+            totalHoursToday: 3,
+            lastClockInTime: new Date(),
+            lastUpdated: new Date()
+          },
+          {
+            id: 'status-3',
+            employeeId: 'emp-3',
+            currentStatus: 'CLOCKED_OUT' as const,
+            totalHoursToday: 8,
+            lastUpdated: new Date()
+          }
+        ];
+        return statuses[callCount++] as EmployeeTimeStatus;
+      });
+
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: [],
+        pagination: { page: 1, limit: 10, total: 0, totalPages: 0 }
+      });
+
+      mockTimeEntryRepo.findIncompleteEntries.mockResolvedValue([]);
+
+      const result = await service.getTeamDashboard(mockTeamIds);
+
+      expect(result.summary.clockedInCount).toBe(1);
+      expect(result.summary.onBreakCount).toBe(1);
+      expect(result.summary.clockedOutCount).toBe(1);
+    });
+  });
+
+  describe('getIncompleteEntriesForEmployee', () => {
+    const mockEmployeeId = 'emp-123';
+
+    it('should return only incomplete entries for specific employee', async () => {
+      const allIncomplete = [
+        {
+          id: 'entry-1',
+          employeeId: mockEmployeeId,
+          clockInTime: new Date(),
+          daysSinceClockIn: 1
+        },
+        {
+          id: 'entry-2',
+          employeeId: 'other-employee',
+          clockInTime: new Date(),
+          daysSinceClockIn: 2
+        },
+        {
+          id: 'entry-3',
+          employeeId: mockEmployeeId,
+          clockInTime: new Date(),
+          daysSinceClockIn: 3
+        }
+      ];
+
+      mockTimeEntryRepo.findIncompleteEntries.mockResolvedValue(allIncomplete);
+
+      const result = await service.getIncompleteEntriesForEmployee(mockEmployeeId);
+
+      expect(result).toHaveLength(2);
+      expect(result.every(e => e.employeeId === mockEmployeeId)).toBe(true);
+    });
+  });
 });

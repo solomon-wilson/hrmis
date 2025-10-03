@@ -1,4 +1,4 @@
-import { TimeEntryRepository, TimeEntryCreateInput } from '../../database/repositories/time-attendance/TimeEntryRepository';
+import { TimeEntryRepository, TimeEntryCreateInput, IncompleteTimeEntry } from '../../database/repositories/time-attendance/TimeEntryRepository';
 import { BreakEntryRepository, BreakEntryCreateInput, BreakEntryUpdateInput } from '../../database/repositories/time-attendance/BreakEntryRepository';
 import { TimeEntry, BreakEntry, GeoLocation, BreakEntryData } from '../../models/time-attendance/TimeEntry';
 import { EmployeeTimeStatus } from '../../models/time-attendance/EmployeeTimeStatus';
@@ -65,6 +65,70 @@ export interface RejectTimeEntryInput {
   rejectedBy: string; // Manager ID
   reason: string;
   notes?: string;
+}
+
+export interface TimeEntryAnomaly {
+  type: 'MISSING_CLOCK_OUT' | 'EXCESSIVE_HOURS' | 'UNUSUAL_HOURS' | 'WEEKEND_WORK' | 'SHORT_ENTRY';
+  severity: 'LOW' | 'MEDIUM' | 'HIGH';
+  timeEntryId: string;
+  employeeId: string;
+  detectedAt: Date;
+  description: string;
+  data: any;
+}
+
+export interface EmployeeDashboardData {
+  employeeId: string;
+  currentStatus: 'CLOCKED_OUT' | 'CLOCKED_IN' | 'ON_BREAK';
+  activeTimeEntryId?: string;
+  activeBreakEntryId?: string;
+  lastClockInTime?: Date;
+  lastBreakStartTime?: Date;
+  totalHoursToday: number;
+  regularHoursToday: number;
+  overtimeHoursToday: number;
+  todayEntries: TimeEntry[];
+  incompleteEntries: IncompleteTimeEntry[];
+  anomalies: TimeEntryAnomaly[];
+  lastUpdated: Date;
+}
+
+export interface EmployeeStatusSummary {
+  employeeId: string;
+  currentStatus: 'CLOCKED_OUT' | 'CLOCKED_IN' | 'ON_BREAK';
+  totalHoursToday: number;
+  lastClockInTime?: Date;
+  anomalyCount: number;
+  incompleteEntryCount: number;
+  hasHighSeverityAnomaly: boolean;
+}
+
+export interface TeamDashboardData {
+  teamStatuses: EmployeeStatusSummary[];
+  summary: {
+    totalEmployees: number;
+    clockedInCount: number;
+    onBreakCount: number;
+    clockedOutCount: number;
+    totalAnomalies: number;
+    totalIncompleteEntries: number;
+    employeesWithAnomalies: number;
+  };
+  lastUpdated: Date;
+}
+
+export interface StatusChangeNotification {
+  employeeId: string;
+  oldStatus: 'CLOCKED_OUT' | 'CLOCKED_IN' | 'ON_BREAK';
+  newStatus: 'CLOCKED_OUT' | 'CLOCKED_IN' | 'ON_BREAK';
+  timestamp: Date;
+  eventType: 'STATUS_CHANGE';
+}
+
+export interface AnomalyNotification {
+  anomaly: TimeEntryAnomaly;
+  timestamp: Date;
+  eventType: 'ANOMALY_DETECTED';
 }
 
 export interface TimeTrackingConfig {
@@ -799,6 +863,331 @@ Requested by: ${input.requestedBy}
     // In a real system, you would filter by manager's team
     // For now, return all pending entries
     return result.data;
+  }
+
+  /**
+   * Get real-time dashboard data for an employee
+   * Includes current status, today's hours, active entries, and anomalies
+   */
+  async getEmployeeDashboard(
+    employeeId: string,
+    userContext?: string
+  ): Promise<EmployeeDashboardData> {
+    // Get current status
+    const currentStatus = await this.getCurrentStatus(employeeId, userContext);
+
+    // Get today's entries
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const todayEntries = await this.timeEntryRepository.findAll(
+      {
+        filters: {
+          employeeId,
+          dateRange: { start: startOfDay, end: endOfDay }
+        }
+      },
+      userContext
+    );
+
+    // Calculate total hours today
+    let totalHoursToday = 0;
+    let regularHoursToday = 0;
+    let overtimeHoursToday = 0;
+
+    for (const entry of todayEntries.data) {
+      if (entry.status === 'COMPLETED') {
+        totalHoursToday += entry.totalHours || 0;
+        regularHoursToday += entry.regularHours || 0;
+        overtimeHoursToday += entry.overtimeHours || 0;
+      }
+    }
+
+    // If currently clocked in, add current session time
+    if (currentStatus.currentStatus === 'CLOCKED_IN' && currentStatus.lastClockInTime) {
+      const now = new Date();
+      const currentSessionMinutes = (now.getTime() - currentStatus.lastClockInTime.getTime()) / (1000 * 60);
+      const currentSessionHours = Math.round((currentSessionMinutes / 60) * 100) / 100;
+      totalHoursToday += currentSessionHours;
+    }
+
+    // Detect anomalies
+    const anomalies = await this.detectEmployeeAnomalies(employeeId, userContext);
+
+    // Get incomplete entries
+    const incompleteEntries = await this.getIncompleteEntriesForEmployee(employeeId, userContext);
+
+    return {
+      employeeId,
+      currentStatus: currentStatus.currentStatus,
+      activeTimeEntryId: currentStatus.activeTimeEntryId,
+      activeBreakEntryId: currentStatus.activeBreakEntryId,
+      lastClockInTime: currentStatus.lastClockInTime,
+      lastBreakStartTime: currentStatus.lastBreakStartTime,
+      totalHoursToday,
+      regularHoursToday,
+      overtimeHoursToday,
+      todayEntries: todayEntries.data,
+      incompleteEntries,
+      anomalies,
+      lastUpdated: new Date()
+    };
+  }
+
+  /**
+   * Get incomplete time entries for an employee
+   */
+  async getIncompleteEntriesForEmployee(
+    employeeId: string,
+    userContext?: string
+  ): Promise<IncompleteTimeEntry[]> {
+    const allIncomplete = await this.timeEntryRepository.findIncompleteEntries(userContext);
+    return allIncomplete.filter(entry => entry.employeeId === employeeId);
+  }
+
+  /**
+   * Detect anomalies for a specific employee
+   */
+  async detectEmployeeAnomalies(
+    employeeId: string,
+    userContext?: string
+  ): Promise<TimeEntryAnomaly[]> {
+    const anomalies: TimeEntryAnomaly[] = [];
+    const now = new Date();
+
+    // Get last 7 days of entries
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 7);
+
+    const recentEntries = await this.timeEntryRepository.findAll(
+      {
+        filters: {
+          employeeId,
+          dateRange: { start: startDate, end: now }
+        }
+      },
+      userContext
+    );
+
+    for (const entry of recentEntries.data) {
+      // Check for missing clock-out
+      if (entry.status === 'ACTIVE' && !entry.clockOutTime) {
+        const hoursSinceClockIn = (now.getTime() - entry.clockInTime.getTime()) / (1000 * 60 * 60);
+
+        if (hoursSinceClockIn > this.config.autoClockOutAfterHours) {
+          anomalies.push({
+            type: 'MISSING_CLOCK_OUT',
+            severity: 'HIGH',
+            timeEntryId: entry.id,
+            employeeId: entry.employeeId,
+            detectedAt: now,
+            description: `Missing clock-out for ${Math.round(hoursSinceClockIn)} hours`,
+            data: {
+              clockInTime: entry.clockInTime,
+              hoursSinceClockIn
+            }
+          });
+        } else if (hoursSinceClockIn > 12) {
+          anomalies.push({
+            type: 'MISSING_CLOCK_OUT',
+            severity: 'MEDIUM',
+            timeEntryId: entry.id,
+            employeeId: entry.employeeId,
+            detectedAt: now,
+            description: `Missing clock-out for ${Math.round(hoursSinceClockIn)} hours`,
+            data: {
+              clockInTime: entry.clockInTime,
+              hoursSinceClockIn
+            }
+          });
+        }
+      }
+
+      // Check for excessive hours
+      if (entry.status === 'COMPLETED' && entry.totalHours) {
+        if (entry.totalHours > this.config.maxDailyHours) {
+          anomalies.push({
+            type: 'EXCESSIVE_HOURS',
+            severity: 'HIGH',
+            timeEntryId: entry.id,
+            employeeId: entry.employeeId,
+            detectedAt: now,
+            description: `${entry.totalHours} hours exceeds maximum of ${this.config.maxDailyHours}`,
+            data: {
+              totalHours: entry.totalHours,
+              maxHours: this.config.maxDailyHours
+            }
+          });
+        } else if (entry.totalHours > this.config.doubleTimeThreshold) {
+          anomalies.push({
+            type: 'EXCESSIVE_HOURS',
+            severity: 'MEDIUM',
+            timeEntryId: entry.id,
+            employeeId: entry.employeeId,
+            detectedAt: now,
+            description: `${entry.totalHours} hours (double-time threshold)`,
+            data: {
+              totalHours: entry.totalHours,
+              threshold: this.config.doubleTimeThreshold
+            }
+          });
+        }
+      }
+
+      // Check for unusual hours (very early or very late)
+      if (entry.clockInTime) {
+        const clockInHour = entry.clockInTime.getHours();
+
+        if (clockInHour < 5 || clockInHour > 23) {
+          anomalies.push({
+            type: 'UNUSUAL_HOURS',
+            severity: 'LOW',
+            timeEntryId: entry.id,
+            employeeId: entry.employeeId,
+            detectedAt: now,
+            description: `Clock-in at ${clockInHour}:00 (unusual time)`,
+            data: {
+              clockInTime: entry.clockInTime,
+              clockInHour
+            }
+          });
+        }
+      }
+
+      // Check for weekend work
+      const dayOfWeek = entry.clockInTime.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        anomalies.push({
+          type: 'WEEKEND_WORK',
+          severity: 'LOW',
+          timeEntryId: entry.id,
+          employeeId: entry.employeeId,
+          detectedAt: now,
+          description: `Work on ${dayOfWeek === 0 ? 'Sunday' : 'Saturday'}`,
+          data: {
+            date: entry.clockInTime,
+            dayOfWeek
+          }
+        });
+      }
+
+      // Check for very short entries (less than 1 hour)
+      if (entry.status === 'COMPLETED' && entry.totalHours && entry.totalHours < 1) {
+        anomalies.push({
+          type: 'SHORT_ENTRY',
+          severity: 'LOW',
+          timeEntryId: entry.id,
+          employeeId: entry.employeeId,
+          detectedAt: now,
+          description: `Very short time entry (${entry.totalHours} hours)`,
+          data: {
+            totalHours: entry.totalHours
+          }
+        });
+      }
+    }
+
+    return anomalies;
+  }
+
+  /**
+   * Get team dashboard data for a manager
+   * Shows real-time status of all team members
+   */
+  async getTeamDashboard(
+    managerTeamEmployeeIds: string[],
+    userContext?: string
+  ): Promise<TeamDashboardData> {
+    const teamStatuses: EmployeeStatusSummary[] = [];
+
+    for (const employeeId of managerTeamEmployeeIds) {
+      const status = await this.getCurrentStatus(employeeId, userContext);
+      const anomalies = await this.detectEmployeeAnomalies(employeeId, userContext);
+      const incomplete = await this.getIncompleteEntriesForEmployee(employeeId, userContext);
+
+      teamStatuses.push({
+        employeeId,
+        currentStatus: status.currentStatus,
+        totalHoursToday: status.totalHoursToday,
+        lastClockInTime: status.lastClockInTime,
+        anomalyCount: anomalies.length,
+        incompleteEntryCount: incomplete.length,
+        hasHighSeverityAnomaly: anomalies.some(a => a.severity === 'HIGH')
+      });
+    }
+
+    // Calculate summary statistics
+    const clockedInCount = teamStatuses.filter(s => s.currentStatus === 'CLOCKED_IN').length;
+    const onBreakCount = teamStatuses.filter(s => s.currentStatus === 'ON_BREAK').length;
+    const clockedOutCount = teamStatuses.filter(s => s.currentStatus === 'CLOCKED_OUT').length;
+    const totalAnomalies = teamStatuses.reduce((sum, s) => sum + s.anomalyCount, 0);
+    const totalIncompleteEntries = teamStatuses.reduce((sum, s) => sum + s.incompleteEntryCount, 0);
+    const employeesWithAnomalies = teamStatuses.filter(s => s.anomalyCount > 0).length;
+
+    return {
+      teamStatuses,
+      summary: {
+        totalEmployees: teamStatuses.length,
+        clockedInCount,
+        onBreakCount,
+        clockedOutCount,
+        totalAnomalies,
+        totalIncompleteEntries,
+        employeesWithAnomalies
+      },
+      lastUpdated: new Date()
+    };
+  }
+
+  /**
+   * Subscribe to status changes (placeholder for real-time notifications)
+   * In a real system, this would integrate with WebSocket or Server-Sent Events
+   */
+  async notifyStatusChange(
+    employeeId: string,
+    oldStatus: 'CLOCKED_OUT' | 'CLOCKED_IN' | 'ON_BREAK',
+    newStatus: 'CLOCKED_OUT' | 'CLOCKED_IN' | 'ON_BREAK',
+    userContext?: string
+  ): Promise<void> {
+    // Placeholder for notification system
+    // In a real implementation, this would:
+    // 1. Publish to a message queue (Redis Pub/Sub, RabbitMQ, etc.)
+    // 2. Notify WebSocket clients
+    // 3. Send push notifications to mobile apps
+    // 4. Update real-time dashboard displays
+
+    const notification: StatusChangeNotification = {
+      employeeId,
+      oldStatus,
+      newStatus,
+      timestamp: new Date(),
+      eventType: 'STATUS_CHANGE'
+    };
+
+    // Log the notification (in production, this would publish to notification system)
+    console.log('Status change notification:', notification);
+  }
+
+  /**
+   * Notify about detected anomalies (placeholder for real-time notifications)
+   */
+  async notifyAnomaly(
+    anomaly: TimeEntryAnomaly,
+    userContext?: string
+  ): Promise<void> {
+    // Placeholder for notification system
+    // In a real implementation, this would notify managers about anomalies
+
+    const notification: AnomalyNotification = {
+      anomaly,
+      timestamp: new Date(),
+      eventType: 'ANOMALY_DETECTED'
+    };
+
+    // Log the notification (in production, this would publish to notification system)
+    console.log('Anomaly notification:', notification);
   }
 
   // Private helper methods
