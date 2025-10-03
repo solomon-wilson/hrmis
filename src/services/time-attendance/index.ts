@@ -7,8 +7,11 @@ export * from './TimeTrackingService';
 // Leave Management Services
 export * from './LeaveManagementService';
 
-// Policy Engine (to be implemented)
-// export * from './PolicyEngine';
+// Policy Engine
+export * from './PolicyEngine';
 
-// Time Calculation Engine (to be implemented)
-// export * from './TimeCalculationEngine';
+// Overtime Calculation Service
+export * from './OvertimeCalculationService';
+
+// Notification Service
+export * from './NotificationService';

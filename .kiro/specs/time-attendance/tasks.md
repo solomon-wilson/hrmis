@@ -141,8 +141,8 @@
   - Write unit tests for balance management and accrual processing
   - _Requirements: 4.4, 7.3, 7.4_
 
-- [ ] 7. Create policy engine and calculation services
-- [ ] 7.1 Implement PolicyEngine for leave policy enforcement
+- [x] 7. Create policy engine and calculation services
+- [x] 7.1 Implement PolicyEngine for leave policy enforcement
 
   - Create policy validation methods for leave requests
   - Add eligibility checking based on employment status and tenure
@@ -150,7 +150,7 @@
   - Write unit tests for policy enforcement scenarios
   - _Requirements: 4.1, 4.2, 4.3_
 
-- [ ] 7.2 Add overtime calculation and policy enforcement
+- [x] 7.2 Add overtime calculation and policy enforcement
 
   - Implement overtime detection for daily and weekly thresholds
   - Create overtime calculation methods with policy-based multipliers
@@ -158,7 +158,7 @@
   - Write unit tests for overtime calculation accuracy
   - _Requirements: 5.2, 5.3_
 
-- [ ] 7.3 Create notification service integration
+- [x] 7.3 Create notification service integration
 
   - Implement notification methods for leave request status changes
   - Add manager notification system for pending approvals
