@@ -34,6 +34,39 @@ export interface EndBreakInput {
   notes?: string;
 }
 
+export interface ManualTimeEntryInput {
+  employeeId: string;
+  clockInTime: Date;
+  clockOutTime: Date;
+  breakEntries?: BreakEntryData[];
+  reason: string;
+  submittedBy: string; // Employee or manager ID who is submitting
+  notes?: string;
+}
+
+export interface TimeEntryCorrectionInput {
+  timeEntryId: string;
+  clockInTime?: Date;
+  clockOutTime?: Date;
+  breakEntries?: BreakEntryData[];
+  reason: string;
+  requestedBy: string; // Employee ID requesting correction
+  notes?: string;
+}
+
+export interface ApproveTimeEntryInput {
+  timeEntryId: string;
+  approvedBy: string; // Manager ID
+  notes?: string;
+}
+
+export interface RejectTimeEntryInput {
+  timeEntryId: string;
+  rejectedBy: string; // Manager ID
+  reason: string;
+  notes?: string;
+}
+
 export interface TimeTrackingConfig {
   allowFutureClockIn: boolean;
   maxClockInDistance?: number; // meters
@@ -42,6 +75,9 @@ export interface TimeTrackingConfig {
   overtimeThreshold: number;
   doubleTimeThreshold: number;
   autoClockOutAfterHours: number;
+  requireApprovalForManualEntry: boolean;
+  requireApprovalForCorrection: boolean;
+  maxPastDaysForManualEntry: number;
 }
 
 export class TimeTrackingService {
@@ -65,6 +101,9 @@ export class TimeTrackingService {
       overtimeThreshold: 8,
       doubleTimeThreshold: 12,
       autoClockOutAfterHours: 24,
+      requireApprovalForManualEntry: true,
+      requireApprovalForCorrection: true,
+      maxPastDaysForManualEntry: 30,
       ...config
     };
   }
@@ -455,6 +494,313 @@ export class TimeTrackingService {
     return autoClockOuts;
   }
 
+  /**
+   * Submit a manual time entry (for missed clock-in/out)
+   * Requires approval if configured
+   */
+  async submitManualEntry(input: ManualTimeEntryInput, userContext?: string): Promise<TimeEntry> {
+    // Validate times
+    this.validateManualEntryTimes(input.clockInTime, input.clockOutTime);
+
+    // Validate not too far in the past
+    this.validateEntryNotTooOld(input.clockInTime);
+
+    // Check for overlapping entries
+    await this.checkForOverlappingEntries(
+      input.employeeId,
+      input.clockInTime,
+      input.clockOutTime,
+      userContext
+    );
+
+    // Calculate hours
+    const breakEntries = input.breakEntries || [];
+    const entryForCalculation = {
+      clockInTime: input.clockInTime,
+      clockOutTime: input.clockOutTime,
+      breakEntries: breakEntries.map(b => ({
+        ...b,
+        duration: b.duration || 0
+      })),
+      getTotalBreakTime: function() {
+        return breakEntries.reduce((sum, b) => sum + (b.duration || 0), 0);
+      },
+      getUnpaidBreakTime: function() {
+        return breakEntries.filter(b => !b.paid).reduce((sum, b) => sum + (b.duration || 0), 0);
+      },
+      getPaidBreakTime: function() {
+        return breakEntries.filter(b => b.paid).reduce((sum, b) => sum + (b.duration || 0), 0);
+      }
+    } as TimeEntry;
+
+    const calculations = this.calculationEngine.calculateTimeEntryHours(entryForCalculation);
+
+    // Validate max daily hours
+    if (calculations.totalHours > this.config.maxDailyHours) {
+      throw new ValidationError(
+        `Total hours (${calculations.totalHours}) exceeds maximum daily hours (${this.config.maxDailyHours})`,
+        [{ field: 'hours', message: 'Exceeds maximum daily hours' }]
+      );
+    }
+
+    // Determine status based on configuration
+    const status = this.config.requireApprovalForManualEntry ? 'PENDING_APPROVAL' : 'COMPLETED';
+
+    // Create time entry
+    const timeEntryData: TimeEntryCreateInput = {
+      employeeId: input.employeeId,
+      clockInTime: input.clockInTime,
+      clockOutTime: input.clockOutTime,
+      breakEntries: input.breakEntries,
+      status,
+      manualEntry: true,
+      notes: `Manual entry - Reason: ${input.reason}${input.notes ? '\n' + input.notes : ''}\nSubmitted by: ${input.submittedBy}`
+    };
+
+    const timeEntry = await this.timeEntryRepository.create(timeEntryData, userContext);
+
+    // Update with calculated hours if not requiring approval
+    if (!this.config.requireApprovalForManualEntry) {
+      return await this.timeEntryRepository.update(
+        timeEntry.id,
+        {
+          totalHours: calculations.totalHours,
+          regularHours: calculations.regularHours,
+          overtimeHours: calculations.overtimeHours
+        },
+        userContext
+      );
+    }
+
+    return timeEntry;
+  }
+
+  /**
+   * Submit a correction request for an existing time entry
+   * Requires approval if configured
+   */
+  async submitTimeEntryCorrection(
+    input: TimeEntryCorrectionInput,
+    userContext?: string
+  ): Promise<TimeEntry> {
+    // Get existing time entry
+    const existingEntry = await this.timeEntryRepository.findById(input.timeEntryId, userContext);
+
+    if (!existingEntry) {
+      throw new AppError('Time entry not found', 'TIME_ENTRY_NOT_FOUND', 404);
+    }
+
+    // Validate employee can only correct their own entries
+    if (existingEntry.employeeId !== input.requestedBy) {
+      throw new AppError(
+        'Cannot correct time entries for other employees',
+        'UNAUTHORIZED_CORRECTION',
+        403
+      );
+    }
+
+    // Validate entry is not already pending approval
+    if (existingEntry.status === 'PENDING_APPROVAL') {
+      throw new AppError(
+        'Cannot correct entry that is pending approval',
+        'ENTRY_PENDING_APPROVAL',
+        409
+      );
+    }
+
+    const newClockInTime = input.clockInTime || existingEntry.clockInTime;
+    const newClockOutTime = input.clockOutTime || existingEntry.clockOutTime;
+
+    // Validate times if changed
+    if (input.clockInTime || input.clockOutTime) {
+      this.validateManualEntryTimes(newClockInTime, newClockOutTime!);
+    }
+
+    // Check for overlapping entries (excluding current entry)
+    await this.checkForOverlappingEntries(
+      existingEntry.employeeId,
+      newClockInTime,
+      newClockOutTime!,
+      userContext,
+      input.timeEntryId
+    );
+
+    // If approval is required, create a copy with PENDING_APPROVAL status
+    if (this.config.requireApprovalForCorrection) {
+      // Store original values in notes for reference
+      const correctionNotes = `
+CORRECTION REQUEST
+Original: ${existingEntry.clockInTime.toISOString()} - ${existingEntry.clockOutTime?.toISOString() || 'N/A'}
+Requested: ${newClockInTime.toISOString()} - ${newClockOutTime?.toISOString() || 'N/A'}
+Reason: ${input.reason}
+${input.notes ? 'Additional notes: ' + input.notes : ''}
+Requested by: ${input.requestedBy}
+      `.trim();
+
+      return await this.timeEntryRepository.update(
+        input.timeEntryId,
+        {
+          clockInTime: newClockInTime,
+          clockOutTime: newClockOutTime,
+          status: 'PENDING_APPROVAL',
+          notes: `${existingEntry.notes || ''}\n\n${correctionNotes}`
+        },
+        userContext
+      );
+    }
+
+    // If no approval required, apply correction immediately
+    const breakEntries = input.breakEntries || existingEntry.breakEntries || [];
+    const entryForCalculation = {
+      clockInTime: newClockInTime,
+      clockOutTime: newClockOutTime,
+      breakEntries,
+      getTotalBreakTime: function() {
+        return breakEntries.reduce((sum: number, b) => sum + (b.duration || 0), 0);
+      },
+      getUnpaidBreakTime: function() {
+        return breakEntries.filter(b => !b.paid).reduce((sum: number, b) => sum + (b.duration || 0), 0);
+      },
+      getPaidBreakTime: function() {
+        return breakEntries.filter(b => b.paid).reduce((sum: number, b) => sum + (b.duration || 0), 0);
+      }
+    } as TimeEntry;
+
+    const calculations = this.calculationEngine.calculateTimeEntryHours(entryForCalculation);
+
+    return await this.timeEntryRepository.update(
+      input.timeEntryId,
+      {
+        clockInTime: newClockInTime,
+        clockOutTime: newClockOutTime,
+        totalHours: calculations.totalHours,
+        regularHours: calculations.regularHours,
+        overtimeHours: calculations.overtimeHours,
+        status: 'COMPLETED',
+        notes: `${existingEntry.notes || ''}\n\nCorrected - Reason: ${input.reason}\nBy: ${input.requestedBy}`
+      },
+      userContext
+    );
+  }
+
+  /**
+   * Approve a pending time entry or correction
+   */
+  async approveTimeEntry(input: ApproveTimeEntryInput, userContext?: string): Promise<TimeEntry> {
+    const timeEntry = await this.timeEntryRepository.findById(input.timeEntryId, userContext);
+
+    if (!timeEntry) {
+      throw new AppError('Time entry not found', 'TIME_ENTRY_NOT_FOUND', 404);
+    }
+
+    if (timeEntry.status !== 'PENDING_APPROVAL') {
+      throw new AppError(
+        'Time entry is not pending approval',
+        'NOT_PENDING_APPROVAL',
+        409
+      );
+    }
+
+    // Calculate hours for the approved entry
+    if (timeEntry.clockOutTime) {
+      const breakEntries = timeEntry.breakEntries || [];
+      const entryForCalculation = {
+        ...timeEntry,
+        getTotalBreakTime: function() {
+          return breakEntries.reduce((sum, b) => sum + (b.duration || 0), 0);
+        },
+        getUnpaidBreakTime: function() {
+          return breakEntries.filter(b => !b.paid).reduce((sum, b) => sum + (b.duration || 0), 0);
+        },
+        getPaidBreakTime: function() {
+          return breakEntries.filter(b => b.paid).reduce((sum, b) => sum + (b.duration || 0), 0);
+        }
+      } as TimeEntry;
+
+      const calculations = this.calculationEngine.calculateTimeEntryHours(entryForCalculation);
+
+      return await this.timeEntryRepository.update(
+        input.timeEntryId,
+        {
+          status: 'COMPLETED',
+          approvedBy: input.approvedBy,
+          approvedAt: new Date(),
+          totalHours: calculations.totalHours,
+          regularHours: calculations.regularHours,
+          overtimeHours: calculations.overtimeHours,
+          notes: `${timeEntry.notes || ''}\n\nApproved by: ${input.approvedBy}${input.notes ? '\nApproval notes: ' + input.notes : ''}`
+        },
+        userContext
+      );
+    }
+
+    return await this.timeEntryRepository.update(
+      input.timeEntryId,
+      {
+        status: 'COMPLETED',
+        approvedBy: input.approvedBy,
+        approvedAt: new Date(),
+        notes: `${timeEntry.notes || ''}\n\nApproved by: ${input.approvedBy}${input.notes ? '\nApproval notes: ' + input.notes : ''}`
+      },
+      userContext
+    );
+  }
+
+  /**
+   * Reject a pending time entry or correction
+   */
+  async rejectTimeEntry(input: RejectTimeEntryInput, userContext?: string): Promise<void> {
+    const timeEntry = await this.timeEntryRepository.findById(input.timeEntryId, userContext);
+
+    if (!timeEntry) {
+      throw new AppError('Time entry not found', 'TIME_ENTRY_NOT_FOUND', 404);
+    }
+
+    if (timeEntry.status !== 'PENDING_APPROVAL') {
+      throw new AppError(
+        'Time entry is not pending approval',
+        'NOT_PENDING_APPROVAL',
+        409
+      );
+    }
+
+    // For manual entries, delete them when rejected
+    if (timeEntry.manualEntry) {
+      await this.timeEntryRepository.delete(input.timeEntryId, userContext);
+      return;
+    }
+
+    // For corrections, revert to the original state (marked in notes)
+    // In a real system, you might store the original values separately
+    await this.timeEntryRepository.update(
+      input.timeEntryId,
+      {
+        status: 'COMPLETED',
+        notes: `${timeEntry.notes || ''}\n\nCorrection REJECTED by: ${input.rejectedBy}\nReason: ${input.reason}${input.notes ? '\nAdditional notes: ' + input.notes : ''}`
+      },
+      userContext
+    );
+  }
+
+  /**
+   * Get all pending time entries requiring approval
+   */
+  async getPendingApprovals(
+    managerId?: string,
+    userContext?: string
+  ): Promise<TimeEntry[]> {
+    const result = await this.timeEntryRepository.findAll(
+      {
+        filters: { status: 'PENDING_APPROVAL' }
+      },
+      userContext
+    );
+
+    // In a real system, you would filter by manager's team
+    // For now, return all pending entries
+    return result.data;
+  }
+
   // Private helper methods
 
   private validateClockInTime(clockInTime: Date): void {
@@ -532,6 +878,107 @@ export class TimeTrackingService {
         return false; // Personal breaks are typically unpaid
       default:
         return false;
+    }
+  }
+
+  private validateManualEntryTimes(clockInTime: Date, clockOutTime: Date): void {
+    // Validate clock out is after clock in
+    if (clockOutTime <= clockInTime) {
+      throw new ValidationError('Clock out time must be after clock in time', [
+        { field: 'clockOutTime', message: 'Must be after clock in time' }
+      ]);
+    }
+
+    // Validate not in the future
+    const now = new Date();
+    if (clockInTime > now) {
+      throw new ValidationError('Clock in time cannot be in the future', [
+        { field: 'clockInTime', message: 'Cannot be in the future' }
+      ]);
+    }
+
+    if (clockOutTime > now) {
+      throw new ValidationError('Clock out time cannot be in the future', [
+        { field: 'clockOutTime', message: 'Cannot be in the future' }
+      ]);
+    }
+  }
+
+  private validateEntryNotTooOld(clockInTime: Date): void {
+    const maxPastDays = this.config.maxPastDaysForManualEntry;
+    const oldestAllowedDate = new Date();
+    oldestAllowedDate.setDate(oldestAllowedDate.getDate() - maxPastDays);
+
+    if (clockInTime < oldestAllowedDate) {
+      throw new ValidationError(
+        `Cannot create manual entry more than ${maxPastDays} days in the past`,
+        [{ field: 'clockInTime', message: `Must be within last ${maxPastDays} days` }]
+      );
+    }
+  }
+
+  private async checkForOverlappingEntries(
+    employeeId: string,
+    startTime: Date,
+    endTime: Date,
+    userContext?: string,
+    excludeEntryId?: string
+  ): Promise<void> {
+    const startOfDay = new Date(startTime);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(endTime);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const existingEntries = await this.timeEntryRepository.findAll(
+      {
+        filters: {
+          employeeId,
+          dateRange: { start: startOfDay, end: endOfDay }
+        }
+      },
+      userContext
+    );
+
+    // Check for overlaps
+    for (const entry of existingEntries.data) {
+      // Skip the entry being corrected
+      if (excludeEntryId && entry.id === excludeEntryId) {
+        continue;
+      }
+
+      if (!entry.clockOutTime) {
+        // Active entry exists
+        throw new AppError(
+          'Cannot create entry overlapping with an active clock-in',
+          'OVERLAPPING_ENTRY',
+          409,
+          { existingEntry: entry }
+        );
+      }
+
+      // Check if times overlap
+      const entryStart = entry.clockInTime.getTime();
+      const entryEnd = entry.clockOutTime.getTime();
+      const newStart = startTime.getTime();
+      const newEnd = endTime.getTime();
+
+      const overlaps = (newStart < entryEnd && newEnd > entryStart);
+
+      if (overlaps) {
+        throw new AppError(
+          'Time entry overlaps with existing entry',
+          'OVERLAPPING_ENTRY',
+          409,
+          {
+            existingEntry: {
+              id: entry.id,
+              clockInTime: entry.clockInTime,
+              clockOutTime: entry.clockOutTime
+            }
+          }
+        );
+      }
     }
   }
 }

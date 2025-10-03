@@ -781,4 +781,444 @@ describe('TimeTrackingService', () => {
       expect(mockTimeEntryRepo.update).not.toHaveBeenCalled();
     });
   });
+
+  describe('submitManualEntry', () => {
+    const mockEmployeeId = 'emp-123';
+    const mockSubmittedBy = 'manager-456';
+    const mockClockInTime = new Date('2024-01-15T09:00:00Z');
+    const mockClockOutTime = new Date('2024-01-15T17:00:00Z');
+
+    it('should successfully submit manual entry requiring approval', async () => {
+      const input = {
+        employeeId: mockEmployeeId,
+        clockInTime: mockClockInTime,
+        clockOutTime: mockClockOutTime,
+        reason: 'Forgot to clock in',
+        submittedBy: mockSubmittedBy
+      };
+
+      const mockTimeEntry = {
+        id: 'entry-123',
+        employeeId: mockEmployeeId,
+        clockInTime: mockClockInTime,
+        clockOutTime: mockClockOutTime,
+        status: 'PENDING_APPROVAL' as const,
+        manualEntry: true,
+        breakEntries: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as TimeEntry;
+
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: [],
+        pagination: { page: 1, limit: 10, total: 0, totalPages: 0 }
+      });
+      mockTimeEntryRepo.create.mockResolvedValue(mockTimeEntry);
+
+      const result = await service.submitManualEntry(input);
+
+      expect(result.status).toBe('PENDING_APPROVAL');
+      expect(result.manualEntry).toBe(true);
+      expect(mockTimeEntryRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          employeeId: mockEmployeeId,
+          clockInTime: mockClockInTime,
+          clockOutTime: mockClockOutTime,
+          status: 'PENDING_APPROVAL',
+          manualEntry: true
+        }),
+        undefined
+      );
+    });
+
+    it('should auto-approve manual entry when approval not required', async () => {
+      const serviceNoApproval = new TimeTrackingService(
+        mockTimeEntryRepo,
+        mockBreakEntryRepo,
+        { requireApprovalForManualEntry: false }
+      );
+
+      const input = {
+        employeeId: mockEmployeeId,
+        clockInTime: mockClockInTime,
+        clockOutTime: mockClockOutTime,
+        reason: 'Forgot to clock in',
+        submittedBy: mockSubmittedBy
+      };
+
+      const mockTimeEntry = {
+        id: 'entry-123',
+        employeeId: mockEmployeeId,
+        clockInTime: mockClockInTime,
+        clockOutTime: mockClockOutTime,
+        status: 'COMPLETED' as const,
+        manualEntry: true,
+        breakEntries: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as TimeEntry;
+
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: [],
+        pagination: { page: 1, limit: 10, total: 0, totalPages: 0 }
+      });
+      mockTimeEntryRepo.create.mockResolvedValue(mockTimeEntry);
+      mockTimeEntryRepo.update.mockResolvedValue({
+        ...mockTimeEntry,
+        totalHours: 8,
+        regularHours: 8,
+        overtimeHours: 0
+      } as TimeEntry);
+
+      const result = await serviceNoApproval.submitManualEntry(input);
+
+      expect(mockTimeEntryRepo.update).toHaveBeenCalledWith(
+        'entry-123',
+        expect.objectContaining({
+          totalHours: expect.any(Number),
+          regularHours: expect.any(Number),
+          overtimeHours: expect.any(Number)
+        }),
+        undefined
+      );
+    });
+
+    it('should reject manual entry with clock out before clock in', async () => {
+      const input = {
+        employeeId: mockEmployeeId,
+        clockInTime: mockClockOutTime,
+        clockOutTime: mockClockInTime,
+        reason: 'Test',
+        submittedBy: mockSubmittedBy
+      };
+
+      await expect(service.submitManualEntry(input)).rejects.toThrow(ValidationError);
+      await expect(service.submitManualEntry(input)).rejects.toThrow('Clock out time must be after clock in time');
+    });
+
+    it('should reject manual entry too far in the past', async () => {
+      const oldDate = new Date();
+      oldDate.setDate(oldDate.getDate() - 31); // 31 days ago (past maxPastDaysForManualEntry)
+
+      const input = {
+        employeeId: mockEmployeeId,
+        clockInTime: oldDate,
+        clockOutTime: new Date(oldDate.getTime() + 8 * 60 * 60 * 1000),
+        reason: 'Test',
+        submittedBy: mockSubmittedBy
+      };
+
+      await expect(service.submitManualEntry(input)).rejects.toThrow(ValidationError);
+      await expect(service.submitManualEntry(input)).rejects.toThrow('more than 30 days in the past');
+    });
+
+    it('should reject overlapping manual entries', async () => {
+      const input = {
+        employeeId: mockEmployeeId,
+        clockInTime: mockClockInTime,
+        clockOutTime: mockClockOutTime,
+        reason: 'Test',
+        submittedBy: mockSubmittedBy
+      };
+
+      const existingEntry = {
+        id: 'existing-123',
+        employeeId: mockEmployeeId,
+        clockInTime: new Date('2024-01-15T08:00:00Z'),
+        clockOutTime: new Date('2024-01-15T16:00:00Z'),
+        status: 'COMPLETED' as const,
+        manualEntry: false,
+        breakEntries: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as TimeEntry;
+
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: [existingEntry],
+        pagination: { page: 1, limit: 10, total: 1, totalPages: 1 }
+      });
+
+      await expect(service.submitManualEntry(input)).rejects.toThrow(AppError);
+      await expect(service.submitManualEntry(input)).rejects.toThrow('overlaps with existing entry');
+    });
+  });
+
+  describe('submitTimeEntryCorrection', () => {
+    const mockEmployeeId = 'emp-123';
+    const mockTimeEntryId = 'entry-123';
+    const mockClockInTime = new Date('2024-01-15T09:00:00Z');
+    const mockClockOutTime = new Date('2024-01-15T17:00:00Z');
+
+    it('should successfully submit correction requiring approval', async () => {
+      const existingEntry = {
+        id: mockTimeEntryId,
+        employeeId: mockEmployeeId,
+        clockInTime: mockClockInTime,
+        clockOutTime: mockClockOutTime,
+        status: 'COMPLETED' as const,
+        manualEntry: false,
+        breakEntries: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as TimeEntry;
+
+      const newClockInTime = new Date('2024-01-15T08:30:00Z');
+
+      const input = {
+        timeEntryId: mockTimeEntryId,
+        clockInTime: newClockInTime,
+        reason: 'Incorrect clock in time',
+        requestedBy: mockEmployeeId
+      };
+
+      mockTimeEntryRepo.findById.mockResolvedValue(existingEntry);
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: [],
+        pagination: { page: 1, limit: 10, total: 0, totalPages: 0 }
+      });
+      mockTimeEntryRepo.update.mockResolvedValue({
+        ...existingEntry,
+        clockInTime: newClockInTime,
+        status: 'PENDING_APPROVAL'
+      } as TimeEntry);
+
+      const result = await service.submitTimeEntryCorrection(input);
+
+      expect(result.status).toBe('PENDING_APPROVAL');
+      expect(mockTimeEntryRepo.update).toHaveBeenCalledWith(
+        mockTimeEntryId,
+        expect.objectContaining({
+          clockInTime: newClockInTime,
+          status: 'PENDING_APPROVAL'
+        }),
+        undefined
+      );
+    });
+
+    it('should reject correction for another employee', async () => {
+      const existingEntry = {
+        id: mockTimeEntryId,
+        employeeId: 'other-employee',
+        clockInTime: mockClockInTime,
+        clockOutTime: mockClockOutTime,
+        status: 'COMPLETED' as const,
+        manualEntry: false,
+        breakEntries: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as TimeEntry;
+
+      const input = {
+        timeEntryId: mockTimeEntryId,
+        clockInTime: new Date('2024-01-15T08:30:00Z'),
+        reason: 'Test',
+        requestedBy: mockEmployeeId
+      };
+
+      mockTimeEntryRepo.findById.mockResolvedValue(existingEntry);
+
+      await expect(service.submitTimeEntryCorrection(input)).rejects.toThrow(AppError);
+      await expect(service.submitTimeEntryCorrection(input)).rejects.toThrow('Cannot correct time entries for other employees');
+    });
+
+    it('should reject correction for pending entry', async () => {
+      const existingEntry = {
+        id: mockTimeEntryId,
+        employeeId: mockEmployeeId,
+        clockInTime: mockClockInTime,
+        clockOutTime: mockClockOutTime,
+        status: 'PENDING_APPROVAL' as const,
+        manualEntry: false,
+        breakEntries: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as TimeEntry;
+
+      const input = {
+        timeEntryId: mockTimeEntryId,
+        clockInTime: new Date('2024-01-15T08:30:00Z'),
+        reason: 'Test',
+        requestedBy: mockEmployeeId
+      };
+
+      mockTimeEntryRepo.findById.mockResolvedValue(existingEntry);
+
+      await expect(service.submitTimeEntryCorrection(input)).rejects.toThrow(AppError);
+      await expect(service.submitTimeEntryCorrection(input)).rejects.toThrow('Cannot correct entry that is pending approval');
+    });
+  });
+
+  describe('approveTimeEntry', () => {
+    const mockTimeEntryId = 'entry-123';
+    const mockApproverId = 'manager-456';
+
+    it('should approve pending time entry', async () => {
+      const pendingEntry = {
+        id: mockTimeEntryId,
+        employeeId: 'emp-123',
+        clockInTime: new Date('2024-01-15T09:00:00Z'),
+        clockOutTime: new Date('2024-01-15T17:00:00Z'),
+        status: 'PENDING_APPROVAL' as const,
+        manualEntry: true,
+        breakEntries: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as TimeEntry;
+
+      const approvedEntry = {
+        ...pendingEntry,
+        status: 'COMPLETED' as const,
+        approvedBy: mockApproverId,
+        approvedAt: new Date(),
+        totalHours: 8,
+        regularHours: 8,
+        overtimeHours: 0
+      } as TimeEntry;
+
+      mockTimeEntryRepo.findById.mockResolvedValue(pendingEntry);
+      mockTimeEntryRepo.update.mockResolvedValue(approvedEntry);
+
+      const result = await service.approveTimeEntry({
+        timeEntryId: mockTimeEntryId,
+        approvedBy: mockApproverId
+      });
+
+      expect(result.status).toBe('COMPLETED');
+      expect(result.approvedBy).toBe(mockApproverId);
+      expect(mockTimeEntryRepo.update).toHaveBeenCalledWith(
+        mockTimeEntryId,
+        expect.objectContaining({
+          status: 'COMPLETED',
+          approvedBy: mockApproverId
+        }),
+        undefined
+      );
+    });
+
+    it('should reject approval for non-pending entry', async () => {
+      const completedEntry = {
+        id: mockTimeEntryId,
+        employeeId: 'emp-123',
+        clockInTime: new Date(),
+        status: 'COMPLETED' as const,
+        manualEntry: true,
+        breakEntries: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as TimeEntry;
+
+      mockTimeEntryRepo.findById.mockResolvedValue(completedEntry);
+
+      await expect(service.approveTimeEntry({
+        timeEntryId: mockTimeEntryId,
+        approvedBy: mockApproverId
+      })).rejects.toThrow(AppError);
+      await expect(service.approveTimeEntry({
+        timeEntryId: mockTimeEntryId,
+        approvedBy: mockApproverId
+      })).rejects.toThrow('Time entry is not pending approval');
+    });
+  });
+
+  describe('rejectTimeEntry', () => {
+    const mockTimeEntryId = 'entry-123';
+    const mockRejectedBy = 'manager-456';
+
+    it('should delete rejected manual entry', async () => {
+      const pendingEntry = {
+        id: mockTimeEntryId,
+        employeeId: 'emp-123',
+        clockInTime: new Date(),
+        clockOutTime: new Date(),
+        status: 'PENDING_APPROVAL' as const,
+        manualEntry: true,
+        breakEntries: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as TimeEntry;
+
+      mockTimeEntryRepo.findById.mockResolvedValue(pendingEntry);
+      mockTimeEntryRepo.delete.mockResolvedValue(true);
+
+      await service.rejectTimeEntry({
+        timeEntryId: mockTimeEntryId,
+        rejectedBy: mockRejectedBy,
+        reason: 'Insufficient justification'
+      });
+
+      expect(mockTimeEntryRepo.delete).toHaveBeenCalledWith(mockTimeEntryId, undefined);
+    });
+
+    it('should revert rejected correction', async () => {
+      const pendingCorrection = {
+        id: mockTimeEntryId,
+        employeeId: 'emp-123',
+        clockInTime: new Date(),
+        clockOutTime: new Date(),
+        status: 'PENDING_APPROVAL' as const,
+        manualEntry: false, // This is a correction
+        breakEntries: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      } as TimeEntry;
+
+      mockTimeEntryRepo.findById.mockResolvedValue(pendingCorrection);
+      mockTimeEntryRepo.update.mockResolvedValue({
+        ...pendingCorrection,
+        status: 'COMPLETED'
+      } as TimeEntry);
+
+      await service.rejectTimeEntry({
+        timeEntryId: mockTimeEntryId,
+        rejectedBy: mockRejectedBy,
+        reason: 'Correction not justified'
+      });
+
+      expect(mockTimeEntryRepo.update).toHaveBeenCalledWith(
+        mockTimeEntryId,
+        expect.objectContaining({
+          status: 'COMPLETED'
+        }),
+        undefined
+      );
+    });
+  });
+
+  describe('getPendingApprovals', () => {
+    it('should return all pending approvals', async () => {
+      const pendingEntries = [
+        {
+          id: 'entry-1',
+          employeeId: 'emp-123',
+          clockInTime: new Date(),
+          status: 'PENDING_APPROVAL' as const,
+          manualEntry: true,
+          breakEntries: [],
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as TimeEntry,
+        {
+          id: 'entry-2',
+          employeeId: 'emp-456',
+          clockInTime: new Date(),
+          status: 'PENDING_APPROVAL' as const,
+          manualEntry: true,
+          breakEntries: [],
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as TimeEntry
+      ];
+
+      mockTimeEntryRepo.findAll.mockResolvedValue({
+        data: pendingEntries,
+        pagination: { page: 1, limit: 10, total: 2, totalPages: 1 }
+      });
+
+      const result = await service.getPendingApprovals();
+
+      expect(result).toHaveLength(2);
+      expect(result[0].status).toBe('PENDING_APPROVAL');
+      expect(result[1].status).toBe('PENDING_APPROVAL');
+    });
+  });
 });
