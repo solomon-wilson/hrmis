@@ -166,8 +166,8 @@
   - Write unit tests for notification triggering and delivery
   - _Requirements: 2.4, 3.1, 5.3_
 
-- [ ] 8. Implement REST API controllers for time tracking
-- [ ] 8.1 Create time clock API endpoints
+- [x] 8. Implement REST API controllers for time tracking
+- [x] 8.1 Create time clock API endpoints
 
   - Implement POST /time/clock-in and /time/clock-out endpoints
   - Add POST /time/break/start and /time/break/end endpoints
@@ -175,7 +175,7 @@
   - Write integration tests for all time clock endpoints
   - _Requirements: 1.1, 1.2, 7.1_
 
-- [ ] 8.2 Add time entry management endpoints
+- [x] 8.2 Add time entry management endpoints
 
   - Implement GET /time/entries endpoint with filtering and pagination
   - Create POST /time/manual-entry endpoint with approval workflow
@@ -183,7 +183,7 @@
   - Write integration tests for time entry management endpoints
   - _Requirements: 1.5, 7.1, 7.2_
 
-- [ ] 8.3 Create employee time dashboard endpoints
+- [x] 8.3 Create employee time dashboard endpoints
 
   - Implement GET /time/dashboard endpoint for employee time summary
   - Add GET /time/pay-period endpoint for current pay period data
@@ -191,8 +191,8 @@
   - Write integration tests for dashboard functionality
   - _Requirements: 7.1, 7.2_
 
-- [ ] 9. Implement REST API controllers for leave management
-- [ ] 9.1 Create leave request API endpoints
+- [x] 9. Implement REST API controllers for leave management
+- [x] 9.1 Create leave request API endpoints
 
   - Implement POST /leave/requests endpoint for request submission
   - Add GET /leave/requests endpoint with role-based filtering
@@ -200,7 +200,7 @@
   - Write integration tests for leave request workflows
   - _Requirements: 2.1, 2.4, 3.1, 3.2_
 
-- [ ] 9.2 Add leave balance and calendar endpoints
+- [x] 9.2 Add leave balance and calendar endpoints
 
   - Implement GET /leave/balances/{employeeId} endpoint
   - Create GET /leave/calendar endpoint for team leave visibility
@@ -208,7 +208,7 @@
   - Write integration tests for leave balance and calendar functionality
   - _Requirements: 7.3, 7.4, 6.2_
 
-- [ ] 9.3 Create manager approval dashboard endpoints
+- [x] 9.3 Create manager approval dashboard endpoints
 
   - Implement GET /leave/pending-approvals endpoint for managers
   - Add GET /leave/team-calendar endpoint for team leave overview
@@ -216,8 +216,8 @@
   - Write integration tests for manager dashboard functionality
   - _Requirements: 3.1, 3.2, 6.1, 6.4_
 
-- [ ] 10. Implement policy configuration and administration
-- [ ] 10.1 Create policy management API endpoints
+- [x] 10. Implement policy configuration and administration
+- [x] 10.1 Create policy management API endpoints
 
   - Implement CRUD endpoints for leave policies and overtime policies
   - Add policy validation and impact analysis endpoints
@@ -225,7 +225,7 @@
   - Write integration tests for policy management functionality
   - _Requirements: 4.1, 4.2, 4.3_
 
-- [ ] 10.2 Add accrual processing and balance management
+- [x] 10.2 Add accrual processing and balance management
 
   - Implement POST /policies/accrual/run endpoint for batch processing
   - Create endpoints for manual balance adjustments with approval
@@ -233,8 +233,8 @@
   - Write integration tests for accrual processing and balance management
   - _Requirements: 4.4, 4.5_
 
-- [ ] 11. Implement reporting and analytics functionality
-- [ ] 11.1 Create attendance reporting endpoints
+- [x] 11. Implement reporting and analytics functionality
+- [x] 11.1 Create attendance reporting endpoints
 
   - Implement GET /reports/attendance endpoint with flexible filtering
   - Add GET /reports/time-summary endpoint for hours and overtime reports
@@ -242,7 +242,7 @@
   - Write integration tests for attendance reporting functionality
   - _Requirements: 5.1, 5.2, 5.3_
 
-- [ ] 11.2 Add leave usage and payroll reporting
+- [x] 11.2 Add leave usage and payroll reporting
 
   - Implement GET /reports/leave-usage endpoint for leave analytics
   - Create POST /reports/payroll-export endpoint for payroll system integration
@@ -250,8 +250,8 @@
   - Write integration tests for leave and payroll reporting
   - _Requirements: 5.4, 5.5, 6.3_
 
-- [ ] 12. Create manager dashboard and team management features
-- [ ] 12.1 Implement manager team dashboard
+- [x] 12. Create manager dashboard and team management features
+- [x] 12.1 Implement manager team dashboard
 
   - Create GET /managers/team-status endpoint for real-time team attendance
   - Add GET /managers/team-schedule endpoint for team calendar view
@@ -259,7 +259,7 @@
   - Write integration tests for manager dashboard functionality
   - _Requirements: 6.1, 6.2, 6.3_
 
-- [ ] 12.2 Add team planning and coverage tools
+- [x] 12.2 Add team planning and coverage tools
 
   - Implement GET /managers/team-availability endpoint for planning
   - Create tools for identifying coverage conflicts and suggesting solutions

@@ -3,3 +3,4 @@ export * from './managerRoutes';
 export * from './employeeSelfServiceRoutes';
 export * from './monitoringRoutes';
 export * from './document-management';
+export * from './time-attendance';
