@@ -38,6 +38,7 @@
     "@types/pdfkit": "^0.17.3",
     "@types/pg": "^8.15.5",
     "bcryptjs": "^3.0.2",
+    "clsx": "^2.1.1",
     "cors": "^2.8.5",
     "csv-writer": "^1.6.0",
     "dotenv": "^16.6.1",
@@ -52,6 +53,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "sharp": "^0.34.4",
+    "tailwind-merge": "^3.3.1",
     "uuid": "^9.0.0",
     "winston": "^3.10.0"
   },

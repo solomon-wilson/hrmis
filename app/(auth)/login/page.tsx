@@ -2,6 +2,10 @@
 
 import { useState } from 'react'
 import { createBrowserSupabaseClient } from '../../../src/utils/web/supabase-browser'
+import { Card } from '@/components/ui/Card'
+import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
+import Link from 'next/link'
 
 export default function LoginPage() {
 	const [email, setEmail] = useState('')
@@ -26,18 +30,67 @@ export default function LoginPage() {
 	}
 
 	return (
-		<main style={{ maxWidth: 360, margin: '64px auto', padding: 16 }}>
-			<h1>Login</h1>
-			<form onSubmit={onSubmit}>
-				<label>Email</label>
-				<input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required style={{ width: '100%', marginBottom: 8 }} />
-				<label>Password</label>
-				<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required style={{ width: '100%', marginBottom: 12 }} />
-				<button type="submit" disabled={loading}>
-					{loading ? 'Signing in...' : 'Sign in'}
-				</button>
-				{error && <p style={{ color: 'red' }}>{error}</p>}
-			</form>
+		<main className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+			<div className="w-full max-w-md">
+				<div className="text-center mb-8">
+					<h1 className="text-3xl font-bold text-gray-900">Welcome Back</h1>
+					<p className="text-gray-600 mt-2">Sign in to access your HRMIS account</p>
+				</div>
+
+				<Card>
+					<form onSubmit={onSubmit} className="space-y-6">
+						{error && (
+							<div
+								className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-md text-sm"
+								role="alert"
+								aria-live="polite"
+							>
+								{error}
+							</div>
+						)}
+
+						<Input
+							id="email"
+							label="Email Address"
+							type="email"
+							value={email}
+							onChange={(e) => setEmail(e.target.value)}
+							required
+							autoComplete="email"
+							placeholder="you@example.com"
+							disabled={loading}
+						/>
+
+						<Input
+							id="password"
+							label="Password"
+							type="password"
+							value={password}
+							onChange={(e) => setPassword(e.target.value)}
+							required
+							autoComplete="current-password"
+							placeholder="Enter your password"
+							disabled={loading}
+						/>
+
+						<Button
+							type="submit"
+							className="w-full"
+							loading={loading}
+							disabled={loading}
+						>
+							Sign in
+						</Button>
+					</form>
+
+					<div className="mt-6 text-center text-sm">
+						<span className="text-gray-600">Don't have an account? </span>
+						<Link href="/signup" className="text-blue-600 hover:text-blue-700 font-medium">
+							Sign up
+						</Link>
+					</div>
+				</Card>
+			</div>
 		</main>
 	)
 }
